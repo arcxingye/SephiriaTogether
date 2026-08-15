@@ -30,6 +30,7 @@ namespace SephiriaTogether
             }
             damage.targetFactionLayers = -1L;
             damage.damage = UnityEngine.Mathf.Clamp(damage.damage * 0.01f, 1f, 5f);
+            damage.failed = EDamageFailType.None;
         }
 
         private static void Postfix(UnitAvatar __instance, DamageInstance damage, EApplyDamageResult __result, State __state)
@@ -69,19 +70,6 @@ namespace SephiriaTogether
         }
     }
 
-    [HarmonyPatch(typeof(UnitAvatar), nameof(UnitAvatar.GetHostileFactionLayers))]
-    internal static class FriendlyFireTargetPatch
-    {
-        private static void Postfix(PlayerAvatar __instance, ref long __result)
-        {
-            if (NetworkServer.active && Plugin.friendlyFire.Value && __instance != null &&
-                RuntimeFactionManager.Instance != null)
-            {
-                __result |= RuntimeFactionManager.Instance.FindFactionLayer(__instance.faction);
-            }
-        }
-    }
-
     [HarmonyPatch(typeof(PlayerAvatar), "HandleBeforeAttack")]
     internal static class FriendlyFireRelationPatch
     {
@@ -90,9 +78,20 @@ namespace SephiriaTogether
             if (Plugin.friendlyFire.Value && target is PlayerAvatar victim &&
                 damage?.origin is PlayerAvatar attacker && attacker != victim)
             {
+                Plugin.LogInfo("FriendlyFireRelationPatch skipped player relation denial.");
+                damage.failed = EDamageFailType.None;
                 return false;
             }
             return true;
+        }
+
+        private static void Postfix(UnitAvatar target, DamageInstance damage)
+        {
+            if (Plugin.friendlyFire.Value && target is PlayerAvatar victim &&
+                damage?.origin is PlayerAvatar attacker && attacker != victim)
+            {
+                damage.failed = EDamageFailType.None;
+            }
         }
     }
 }

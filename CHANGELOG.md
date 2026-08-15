@@ -5,6 +5,7 @@
 - Add optional host-only breathing HP recovery after combat.
 - Add optional host-only player friendly fire at 1% damage, capped at 5 HP per hit.
 - Add fixed 1 HP/s delayed healing after damage, with a 10-second delay and combat support.
+- Prevent friendly-fire target handling from making dagger attacks trigger parries on empty swings.
 - Remove the unsafe force-next-stage action, which could regenerate the current stage.
 - Add an optional host setting that bypasses only the living-player distance check when the host uses the correct stage entrance normally.
 
