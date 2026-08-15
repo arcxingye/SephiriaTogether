@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using HarmonyLib;
 using Mirror;
@@ -42,9 +43,12 @@ namespace SephiriaTogether
     [HarmonyPatch]
     internal static class StageRequestCapturePatch
     {
-        private static MethodBase TargetMethod() => AccessTools.Method(
-            typeof(PlayerAvatar),
-            "UserCode_CmdMoveStage__Boolean__PlayerAvatar__Vector3__String");
+        private static bool Prepare() => TargetMethod() != null;
+
+        private static MethodBase TargetMethod() => typeof(PlayerAvatar)
+            .GetMethods(AccessTools.all)
+            .FirstOrDefault(method => method.Name.StartsWith("UserCode_CmdMoveStage") &&
+                                      method.GetParameters().Length == 4);
 
         private static void Prefix(string stageName) => StageTransition.Remember(stageName);
     }
@@ -52,9 +56,12 @@ namespace SephiriaTogether
     [HarmonyPatch]
     internal static class DungeonProgressValidationPatch
     {
-        private static MethodBase TargetMethod() => AccessTools.Method(
-            typeof(DungeonManager),
-            "UserCode_CmdSendProgressValidationRequest__Int32__Int32__Boolean__String_005B_005D__Int32__Int32__NetworkConnectionToClient");
+        private static bool Prepare() => TargetMethod() != null;
+
+        private static MethodBase TargetMethod() => typeof(DungeonManager)
+            .GetMethods(AccessTools.all)
+            .FirstOrDefault(method => method.Name.StartsWith("UserCode_CmdSendProgressValidationRequest") &&
+                                      method.GetParameters().Length == 7);
 
         private static void Prefix(ref int clientChapterNum)
         {
