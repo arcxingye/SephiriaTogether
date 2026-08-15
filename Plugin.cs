@@ -124,6 +124,7 @@ namespace SephiriaTogether
         internal static void SetEnemyCountPerExtraPlayer(float value) => enemyCountPerExtraPlayer.Value = Mathf.Clamp(value, 0f, 1f);
         internal static void SetMaximumEnemyCountMultiplier(float value) => maximumEnemyCountMultiplier.Value = Mathf.Clamp(value, 1f, 10f);
         internal static void SaveSettings() => Instance?.Config.Save();
+        internal static void LogInfo(string message) => Instance?.Logger.LogInfo(message);
 
         internal static void ApplyPlayerLimit()
         {
