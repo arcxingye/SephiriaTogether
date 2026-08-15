@@ -29,9 +29,8 @@ The host can press `F8` to open the configuration panel. The player limit is a n
 ## Installation
 
 1. Install BepInEx 5 for Sephiria.
-2. Remove `Sephiria50.dll`, `Sephiria50Scaling.dll` and `Sephiria100Coop.dll`.
-3. Put `SephiriaTogether.dll` in `BepInEx/plugins` on the host.
-4. Start the game once to generate `BepInEx/config/com.sephiriamods.sephiriatogether.cfg`.
+2. Put `SephiriaTogether.dll` in `BepInEx/plugins` on the host.
+3. Start the game once to generate `BepInEx/config/com.sephiriamods.sephiriatogether.cfg`.
 
 The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh mid-run joining does not require the plugin on clients; clients that need the game's automatic reconnect UI should also install it or use `-allow_rejoin`.
 
@@ -91,7 +90,6 @@ This creates `artifacts/SephiriaTogether.dll` and `artifacts/SephiriaTogether-3.
 
 - Built for Sephiria 1.0.29, Unity Mono, Windows x64.
 - Requires BepInEx 5.
-- Replaces the old `Sephiria50.dll`, `Sephiria50Scaling.dll` and `Sephiria100Coop.dll`.
 - Game updates can change internal methods and require a rebuild.
 
 ## License
