@@ -36,6 +36,7 @@ namespace SephiriaTogether
         private static bool previousInputBlock;
         private static string playerLimitText;
         private static Vector2 scroll;
+        private static bool showAdvancedScaling;
 
         internal static void Toggle()
         {
@@ -155,6 +156,39 @@ namespace SephiriaTogether
             EndSection();
 
             BeginSection(MenuText.Get("EnemyScaling"));
+            GUILayout.Label(MenuText.Get("ScalingHelp"), muted);
+            GUILayout.Space(6f);
+            DrawValue(MenuText.Get("CurrentPreset"), GetPresetName());
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(MenuText.Get("PresetOriginal"), button, GUILayout.Height(34f))) ApplyScalingPreset(0);
+            if (GUILayout.Button(MenuText.Get("PresetLight"), button, GUILayout.Height(34f))) ApplyScalingPreset(1);
+            GUILayout.EndHorizontal();
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(MenuText.Get("PresetStandard"), primaryButton, GUILayout.Height(34f))) ApplyScalingPreset(2);
+            if (GUILayout.Button(MenuText.Get("PresetHigh"), button, GUILayout.Height(34f))) ApplyScalingPreset(3);
+            GUILayout.EndHorizontal();
+            GUILayout.Space(8f);
+            int activePlayers = Mathf.Max(1, PlayerSpawner.MultiplayerList != null ? PlayerSpawner.MultiplayerList.Count : 1);
+            int extraPlayers = Mathf.Max(0, activePlayers - Plugin.BaselinePlayersValue);
+            float healthMultiplier = 1f + extraPlayers * Plugin.HealthPerExtraPlayerValue;
+            if (Plugin.MaximumMultiplierValue > 0f) healthMultiplier = Mathf.Min(healthMultiplier, Plugin.MaximumMultiplierValue);
+            float countMultiplier = Plugin.scaleEnemyCount.Value
+                ? Mathf.Min(Plugin.MaximumEnemyCountMultiplierValue, 1f + extraPlayers * Plugin.EnemyCountPerExtraPlayerValue)
+                : 1f;
+            GUILayout.BeginVertical(playerCard);
+            GUILayout.Label(string.Format(MenuText.Get("ScalingPreviewPlayers"), activePlayers), section);
+            DrawValue(MenuText.Get("PreviewHealth"), healthMultiplier.ToString("0.00") + "x");
+            DrawValue(MenuText.Get("PreviewCount"), countMultiplier.ToString("0.00") + "x");
+            GUILayout.Label(MenuText.Get("ScalingTiming"), muted);
+            GUILayout.EndVertical();
+            GUILayout.Space(6f);
+            if (GUILayout.Button(showAdvancedScaling ? MenuText.Get("HideAdvanced") : MenuText.Get("ShowAdvanced"), button, GUILayout.Height(32f)))
+            {
+                showAdvancedScaling = !showAdvancedScaling;
+            }
+            if (showAdvancedScaling)
+            {
+                GUILayout.Space(8f);
             GUILayout.BeginHorizontal();
             GUILayout.Label(MenuText.Get("Baseline"), body);
             GUILayout.FlexibleSpace();
@@ -184,6 +218,7 @@ namespace SephiriaTogether
             if (GUILayout.Button("-0.5x", button, GUILayout.Height(32f))) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue - 0.5f);
             if (GUILayout.Button("+0.5x", button, GUILayout.Height(32f))) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue + 0.5f);
             GUILayout.EndHorizontal();
+            }
             EndSection();
 
             DrawPlayers();
@@ -226,6 +261,63 @@ namespace SephiriaTogether
                 }
                 GUILayout.EndVertical();
             }
+        }
+
+        private static void ApplyScalingPreset(int preset)
+        {
+            Plugin.SetBaselinePlayers(4);
+            if (preset == 0)
+            {
+                Plugin.SetHealthPerExtraPlayer(0f);
+                Plugin.SetMaximumMultiplier(1f);
+                Plugin.scaleEnemyCount.Value = false;
+                Plugin.SetEnemyCountPerExtraPlayer(0f);
+                Plugin.SetMaximumEnemyCountMultiplier(1f);
+            }
+            else if (preset == 1)
+            {
+                Plugin.SetHealthPerExtraPlayer(0.1f);
+                Plugin.SetMaximumMultiplier(4f);
+                Plugin.scaleEnemyCount.Value = true;
+                Plugin.SetEnemyCountPerExtraPlayer(0.04f);
+                Plugin.SetMaximumEnemyCountMultiplier(2f);
+            }
+            else if (preset == 2)
+            {
+                Plugin.SetHealthPerExtraPlayer(0.15f);
+                Plugin.SetMaximumMultiplier(8f);
+                Plugin.scaleEnemyCount.Value = true;
+                Plugin.SetEnemyCountPerExtraPlayer(0.08f);
+                Plugin.SetMaximumEnemyCountMultiplier(3f);
+            }
+            else
+            {
+                Plugin.SetHealthPerExtraPlayer(0.25f);
+                Plugin.SetMaximumMultiplier(12f);
+                Plugin.scaleEnemyCount.Value = true;
+                Plugin.SetEnemyCountPerExtraPlayer(0.15f);
+                Plugin.SetMaximumEnemyCountMultiplier(4f);
+            }
+            Plugin.SaveSettings();
+        }
+
+        private static string GetPresetName()
+        {
+            if (MatchesScaling(0f, 1f, false, 0f, 1f)) return MenuText.Get("PresetOriginal");
+            if (MatchesScaling(0.1f, 4f, true, 0.04f, 2f)) return MenuText.Get("PresetLight");
+            if (MatchesScaling(0.15f, 8f, true, 0.08f, 3f)) return MenuText.Get("PresetStandard");
+            if (MatchesScaling(0.25f, 12f, true, 0.15f, 4f)) return MenuText.Get("PresetHigh");
+            return MenuText.Get("PresetCustom");
+        }
+
+        private static bool MatchesScaling(float hp, float hpCap, bool countEnabled, float count, float countCap)
+        {
+            return Plugin.BaselinePlayersValue == 4 &&
+                   Mathf.Approximately(Plugin.HealthPerExtraPlayerValue, hp) &&
+                   Mathf.Approximately(Plugin.MaximumMultiplierValue, hpCap) &&
+                   Plugin.scaleEnemyCount.Value == countEnabled &&
+                   Mathf.Approximately(Plugin.EnemyCountPerExtraPlayerValue, count) &&
+                   Mathf.Approximately(Plugin.MaximumEnemyCountMultiplierValue, countCap);
         }
 
         private static void BeginSection(string heading)
