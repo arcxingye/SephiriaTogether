@@ -6,9 +6,30 @@ namespace SephiriaTogether
     internal static class CoopMenu
     {
         private static bool open;
-        private static Rect window = new Rect(24f, 24f, 430f, 420f);
+        private static Rect window = new Rect(24f, 24f, 540f, 620f);
         private static GUIStyle title;
         private static GUIStyle section;
+        private static GUIStyle windowStyle;
+        private static GUIStyle card;
+        private static GUIStyle playerCard;
+        private static GUIStyle body;
+        private static GUIStyle muted;
+        private static GUIStyle button;
+        private static GUIStyle primaryButton;
+        private static GUIStyle dangerButton;
+        private static GUIStyle input;
+        private static GUIStyle badge;
+        private static GUIStyle toggleOn;
+        private static GUIStyle toggleOff;
+        private static Texture2D windowTexture;
+        private static Texture2D cardTexture;
+        private static Texture2D playerCardTexture;
+        private static Texture2D buttonTexture;
+        private static Texture2D buttonHoverTexture;
+        private static Texture2D primaryTexture;
+        private static Texture2D primaryHoverTexture;
+        private static Texture2D dangerTexture;
+        private static Texture2D inputTexture;
         private static bool previousCursorVisible;
         private static CursorLockMode previousCursorLockMode;
         private static PlayerInputController blockedController;
@@ -62,119 +83,257 @@ namespace SephiriaTogether
                 previousInputBlock = blockedController.BlockAvatarInput;
                 blockedController.BlockAvatarInput = true;
             }
+            window.width = Mathf.Min(540f, Mathf.Max(360f, Screen.width - 24f));
             window.x = Mathf.Clamp(window.x, 0f, Mathf.Max(0f, Screen.width - window.width));
-            window.height = Mathf.Min(620f, Mathf.Max(300f, Screen.height - 48f));
+            window.height = Mathf.Min(680f, Mathf.Max(360f, Screen.height - 24f));
             window.y = Mathf.Clamp(window.y, 0f, Mathf.Max(0f, Screen.height - window.height));
 
-            title ??= new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold };
-            section ??= new GUIStyle(GUI.skin.label) { fontStyle = FontStyle.Bold };
-            window = GUI.Window(100100, window, DrawWindow, MenuText.Get("Title"));
+            EnsureStyles();
+            window = GUI.Window(100100, window, DrawWindow, GUIContent.none, windowStyle);
         }
 
         private static void DrawWindow(int id)
         {
             GUILayout.BeginVertical();
-            GUILayout.Label(MenuText.Get("HostSettings"), title);
+            GUILayout.BeginHorizontal(GUILayout.Height(46f));
+            GUILayout.BeginVertical();
+            GUILayout.Label(MenuText.Get("Title"), title);
+            GUILayout.Label(MenuText.Get("HostSettings"), muted);
+            GUILayout.EndVertical();
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("X", button, GUILayout.Width(36f), GUILayout.Height(32f))) Close();
+            GUILayout.EndHorizontal();
+            DrawDivider();
             if (!NetworkServer.active)
             {
-                GUILayout.Label(MenuText.Get("HostOnly"));
-                if (GUILayout.Button(MenuText.Get("Close"))) Close();
+                GUILayout.Space(10f);
+                GUILayout.BeginVertical(card);
+                GUILayout.Label(MenuText.Get("HostOnly"), body);
+                GUILayout.Space(8f);
+                if (GUILayout.Button(MenuText.Get("Close"), primaryButton, GUILayout.Height(36f))) Close();
                 GUILayout.EndVertical();
-                GUI.DragWindow(new Rect(0f, 0f, 10000f, 22f));
+                GUILayout.EndVertical();
+                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
                 return;
             }
             scroll = GUILayout.BeginScrollView(scroll);
-            GUILayout.Label(MenuText.Get("NextSpawn"));
-            GUILayout.Space(6f);
-            GUILayout.Label(MenuText.Get("Multiplayer"), section);
-            GUILayout.Label(MenuText.Get("PlayerLimit"));
-            playerLimitText = GUILayout.TextField(playerLimitText ?? PlayerLimit.CurrentLimit.ToString(), 3);
-            if (GUILayout.Button(MenuText.Get("Apply")) && int.TryParse(playerLimitText, out int requestedLimit))
+            GUILayout.Space(8f);
+            GUILayout.Label(MenuText.Get("NextSpawn"), muted);
+            GUILayout.Space(10f);
+
+            BeginSection(MenuText.Get("Multiplayer"));
+            GUILayout.Label(MenuText.Get("PlayerLimit"), body);
+            GUILayout.BeginHorizontal();
+            playerLimitText = GUILayout.TextField(playerLimitText ?? PlayerLimit.CurrentLimit.ToString(), 3, input, GUILayout.Height(34f));
+            if (GUILayout.Button(MenuText.Get("Apply"), primaryButton, GUILayout.Width(170f), GUILayout.Height(34f)) && int.TryParse(playerLimitText, out int requestedLimit))
             {
                 PlayerLimit.SetLimit(requestedLimit);
                 playerLimitText = PlayerLimit.CurrentLimit.ToString();
             }
-            Plugin.allowLowerProgressPlayers.Value = GUILayout.Toggle(Plugin.allowLowerProgressPlayers.Value, MenuText.Get("LowerProgress"));
-            Plugin.allowMidRunJoin.Value = GUILayout.Toggle(Plugin.allowMidRunJoin.Value, MenuText.Get("MidRun"));
+            GUILayout.EndHorizontal();
+            DrawToggle(MenuText.Get("LowerProgress"), Plugin.allowLowerProgressPlayers);
+            DrawToggle(MenuText.Get("MidRun"), Plugin.allowMidRunJoin);
+            GUILayout.Space(8f);
             GUILayout.Label(MenuText.Get("StageTransition"), section);
             GUILayout.Label(StageTransition.CanForce
                 ? MenuText.Get("PendingStage") + ": " + StageTransition.PendingStageName
-                : MenuText.Get("NoPendingStage"));
+                : MenuText.Get("NoPendingStage"), StageTransition.CanForce ? body : muted);
             GUI.enabled = StageTransition.CanForce;
-            if (GUILayout.Button(MenuText.Get("ForceNextStage")))
+            if (GUILayout.Button(MenuText.Get("ForceNextStage"), primaryButton, GUILayout.Height(38f)))
             {
                 StageTransition.ForcePendingStage();
                 Toggle();
             }
             GUI.enabled = true;
-            GUILayout.Label(MenuText.Get("Catchup") + ": " + (Plugin.catchUpExperienceRatio.Value * 100f).ToString("0") + "%");
-            if (GUILayout.Button(MenuText.Get("CycleCatchup")))
+            GUILayout.Space(8f);
+            DrawValue(MenuText.Get("Catchup"), (Plugin.catchUpExperienceRatio.Value * 100f).ToString("0") + "%");
+            if (GUILayout.Button(MenuText.Get("CycleCatchup"), button, GUILayout.Height(34f)))
             {
                 float value = Plugin.catchUpExperienceRatio.Value;
                 Plugin.catchUpExperienceRatio.Value = value < 0.01f ? 0.5f : value < 0.51f ? 0.75f : value < 0.76f ? 1f : 0f;
             }
-            GUILayout.Space(6f);
-            GUILayout.Label(MenuText.Get("EnemyScaling"), section);
+            EndSection();
+
+            BeginSection(MenuText.Get("EnemyScaling"));
             GUILayout.BeginHorizontal();
-            GUILayout.Label(MenuText.Get("Baseline") + ": " + Plugin.BaselinePlayersValue, GUILayout.Width(190f));
-            if (GUILayout.Button("-", GUILayout.Width(30f))) Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue - 1);
-            if (GUILayout.Button("+", GUILayout.Width(30f))) Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue + 1);
+            GUILayout.Label(MenuText.Get("Baseline"), body);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("-", button, GUILayout.Width(36f), GUILayout.Height(30f))) Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue - 1);
+            GUILayout.Label(Plugin.BaselinePlayersValue.ToString(), badge, GUILayout.Width(54f), GUILayout.Height(30f));
+            if (GUILayout.Button("+", button, GUILayout.Width(36f), GUILayout.Height(30f))) Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue + 1);
             GUILayout.EndHorizontal();
-            GUILayout.Label(MenuText.Get("ExtraHp") + ": " + (Plugin.HealthPerExtraPlayerValue * 100f).ToString("0") + "%");
+            DrawValue(MenuText.Get("ExtraHp"), (Plugin.HealthPerExtraPlayerValue * 100f).ToString("0") + "%");
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("-5%")) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue - 0.05f);
-            if (GUILayout.Button("+5%")) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue + 0.05f);
+            if (GUILayout.Button("-5%", button, GUILayout.Height(32f))) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue - 0.05f);
+            if (GUILayout.Button("+5%", button, GUILayout.Height(32f))) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue + 0.05f);
             GUILayout.EndHorizontal();
-            GUILayout.Label(MenuText.Get("HpCap") + ": " + Plugin.MaximumMultiplierValue.ToString("0.##") + "x");
-            if (GUILayout.Button("Cycle cap 4x / 8x / 12x / uncapped"))
+            DrawValue(MenuText.Get("HpCap"), Plugin.MaximumMultiplierValue.ToString("0.##") + "x");
+            if (GUILayout.Button("Cycle cap 4x / 8x / 12x / uncapped", button, GUILayout.Height(32f)))
             {
                 float value = Plugin.MaximumMultiplierValue;
                 Plugin.SetMaximumMultiplier(value < 4.1f ? 8f : value < 8.1f ? 12f : value < 12.1f ? 0f : 4f);
             }
-            Plugin.scaleEnemyCount.Value = GUILayout.Toggle(Plugin.scaleEnemyCount.Value, MenuText.Get("EnemyCount"));
-            GUILayout.Label(MenuText.Get("CountPerPlayer") + ": " + (Plugin.EnemyCountPerExtraPlayerValue * 100f).ToString("0") + "%");
+            DrawToggle(MenuText.Get("EnemyCount"), Plugin.scaleEnemyCount);
+            DrawValue(MenuText.Get("CountPerPlayer"), (Plugin.EnemyCountPerExtraPlayerValue * 100f).ToString("0") + "%");
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("-2%")) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue - 0.02f);
-            if (GUILayout.Button("+2%")) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue + 0.02f);
+            if (GUILayout.Button("-2%", button, GUILayout.Height(32f))) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue - 0.02f);
+            if (GUILayout.Button("+2%", button, GUILayout.Height(32f))) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue + 0.02f);
             GUILayout.EndHorizontal();
-            GUILayout.Label(MenuText.Get("CountCap") + ": " + Plugin.MaximumEnemyCountMultiplierValue.ToString("0.##") + "x");
+            DrawValue(MenuText.Get("CountCap"), Plugin.MaximumEnemyCountMultiplierValue.ToString("0.##") + "x");
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("-0.5x")) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue - 0.5f);
-            if (GUILayout.Button("+0.5x")) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue + 0.5f);
+            if (GUILayout.Button("-0.5x", button, GUILayout.Height(32f))) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue - 0.5f);
+            if (GUILayout.Button("+0.5x", button, GUILayout.Height(32f))) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue + 0.5f);
             GUILayout.EndHorizontal();
+            EndSection();
+
             DrawPlayers();
+            GUILayout.Space(4f);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(MenuText.Get("Save"), primaryButton, GUILayout.Height(38f))) Plugin.SaveSettings();
+            if (GUILayout.Button(MenuText.Get("Close"), button, GUILayout.Height(38f))) Toggle();
+            GUILayout.EndHorizontal();
             GUILayout.Space(8f);
-            if (GUILayout.Button(MenuText.Get("Save"))) Plugin.SaveSettings();
-            if (GUILayout.Button(MenuText.Get("Close"))) Toggle();
             GUILayout.EndScrollView();
             GUILayout.EndVertical();
-            GUI.DragWindow(new Rect(0f, 0f, 10000f, 22f));
+            GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
         }
 
         private static void DrawPlayers()
         {
-            GUILayout.Space(8f);
             int count = PlayerSpawner.MultiplayerList != null ? PlayerSpawner.MultiplayerList.Count : 0;
-            GUILayout.Label(MenuText.Get("Players") + " (" + count + ")", section);
+            GUILayout.Label(MenuText.Get("Players") + "  " + count, section);
             if (PlayerSpawner.MultiplayerList == null) return;
             foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList.ToArray())
             {
                 if (player == null || player.PlayerAvatar == null) continue;
                 LevelController level = player.GetComponent<LevelController>();
-                string status = player.PlayerAvatar.Name + " | " + MenuText.Get("Level") + " " + (level != null ? level.currentLevel : 0) +
-                                " | HP " + player.PlayerAvatar.hp.ToString("0") + "/" + player.PlayerAvatar.MaxHp.ToString("0") +
-                                " | " + MenuText.Get("Floor") + " " + (string.IsNullOrEmpty(player.PlayerAvatar.currentFloorGuid) ? "-" : player.PlayerAvatar.currentFloorGuid);
-                if (player.isHost) status += " | " + MenuText.Get("Host");
-                if (player.PlayerAvatar.IsDead) status += " | " + MenuText.Get("Dead");
-                if (string.IsNullOrEmpty(player.PlayerAvatar.currentFloorGuid)) status += " | " + MenuText.Get("Loading");
-                GUILayout.Label(status);
+                GUILayout.BeginVertical(playerCard);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(player.PlayerAvatar.Name, section);
+                GUILayout.FlexibleSpace();
+                string state = player.isHost ? MenuText.Get("Host") : player.PlayerAvatar.IsDead
+                    ? MenuText.Get("Dead") : string.IsNullOrEmpty(player.PlayerAvatar.currentFloorGuid)
+                        ? MenuText.Get("Loading") : MenuText.Get("Connected");
+                GUILayout.Label(state, badge, GUILayout.Width(90f), GUILayout.Height(26f));
+                GUILayout.EndHorizontal();
+                string details = MenuText.Get("Level") + " " + (level != null ? level.currentLevel : 0) +
+                                 "     HP " + player.PlayerAvatar.hp.ToString("0") + " / " + player.PlayerAvatar.MaxHp.ToString("0") +
+                                 "     " + MenuText.Get("Floor") + " " + (string.IsNullOrEmpty(player.PlayerAvatar.currentFloorGuid) ? "-" : player.PlayerAvatar.currentFloorGuid);
+                GUILayout.Label(details, muted);
                 if (!player.isHost && player.connectionToClient != null)
                 {
-                    GUILayout.BeginHorizontal();
-                    if (GUILayout.Button(MenuText.Get("Kick"))) Kick(player);
-                    GUILayout.EndHorizontal();
+                    if (GUILayout.Button(MenuText.Get("Kick"), dangerButton, GUILayout.Height(30f))) Kick(player);
                 }
+                GUILayout.EndVertical();
             }
+        }
+
+        private static void BeginSection(string heading)
+        {
+            GUILayout.BeginVertical(card);
+            GUILayout.Label(heading, section);
+            GUILayout.Space(4f);
+        }
+
+        private static void EndSection()
+        {
+            GUILayout.EndVertical();
+            GUILayout.Space(10f);
+        }
+
+        private static void DrawValue(string label, string value)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(label, body);
+            GUILayout.FlexibleSpace();
+            GUILayout.Label(value, badge, GUILayout.Width(76f), GUILayout.Height(28f));
+            GUILayout.EndHorizontal();
+        }
+
+        private static void DrawToggle(string label, BepInEx.Configuration.ConfigEntry<bool> setting)
+        {
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(label, body);
+            GUILayout.FlexibleSpace();
+            bool enabled = setting.Value;
+            if (GUILayout.Button(enabled ? "ON" : "OFF", enabled ? toggleOn : toggleOff, GUILayout.Width(72f), GUILayout.Height(30f)))
+            {
+                setting.Value = !enabled;
+            }
+            GUILayout.EndHorizontal();
+        }
+
+        private static void DrawDivider()
+        {
+            Rect divider = GUILayoutUtility.GetRect(1f, 1f, GUILayout.ExpandWidth(true));
+            GUI.DrawTexture(divider, buttonTexture);
+        }
+
+        private static Texture2D MakeTexture(Color color)
+        {
+            Texture2D texture = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            texture.SetPixel(0, 0, color);
+            texture.Apply();
+            return texture;
+        }
+
+        private static void EnsureStyles()
+        {
+            if (windowStyle != null) return;
+
+            windowTexture = MakeTexture(new Color(0.035f, 0.047f, 0.065f, 0.98f));
+            cardTexture = MakeTexture(new Color(0.075f, 0.094f, 0.12f, 1f));
+            playerCardTexture = MakeTexture(new Color(0.095f, 0.115f, 0.145f, 1f));
+            buttonTexture = MakeTexture(new Color(0.16f, 0.19f, 0.23f, 1f));
+            buttonHoverTexture = MakeTexture(new Color(0.22f, 0.26f, 0.31f, 1f));
+            primaryTexture = MakeTexture(new Color(0.1f, 0.48f, 0.56f, 1f));
+            primaryHoverTexture = MakeTexture(new Color(0.13f, 0.6f, 0.69f, 1f));
+            dangerTexture = MakeTexture(new Color(0.55f, 0.18f, 0.2f, 1f));
+            inputTexture = MakeTexture(new Color(0.025f, 0.032f, 0.045f, 1f));
+
+            Color text = new Color(0.92f, 0.95f, 0.97f);
+            Color dim = new Color(0.62f, 0.69f, 0.74f);
+            windowStyle = new GUIStyle(GUI.skin.window) { padding = new RectOffset(18, 18, 14, 16) };
+            windowStyle.normal.background = windowTexture;
+            title = new GUIStyle(GUI.skin.label) { fontSize = 21, fontStyle = FontStyle.Bold, normal = { textColor = text } };
+            section = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.55f, 0.9f, 0.95f) } };
+            body = new GUIStyle(GUI.skin.label) { fontSize = 13, wordWrap = true, alignment = TextAnchor.MiddleLeft, normal = { textColor = text } };
+            muted = new GUIStyle(body) { fontSize = 12, normal = { textColor = dim } };
+            card = new GUIStyle(GUI.skin.box) { padding = new RectOffset(13, 13, 11, 12), margin = new RectOffset(0, 0, 0, 0) };
+            card.normal.background = cardTexture;
+            playerCard = new GUIStyle(card) { margin = new RectOffset(0, 0, 3, 4) };
+            playerCard.normal.background = playerCardTexture;
+            button = CreateButtonStyle(buttonTexture, buttonHoverTexture, text);
+            primaryButton = CreateButtonStyle(primaryTexture, primaryHoverTexture, Color.white);
+            dangerButton = CreateButtonStyle(dangerTexture, buttonHoverTexture, Color.white);
+            input = new GUIStyle(GUI.skin.textField) { fontSize = 14, alignment = TextAnchor.MiddleCenter, padding = new RectOffset(10, 10, 5, 5) };
+            input.normal.background = inputTexture;
+            input.normal.textColor = text;
+            input.focused.background = inputTexture;
+            input.focused.textColor = Color.white;
+            badge = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, padding = new RectOffset(7, 7, 3, 3) };
+            badge.normal.background = buttonTexture;
+            toggleOn = CreateButtonStyle(primaryTexture, primaryHoverTexture, Color.white);
+            toggleOff = CreateButtonStyle(buttonTexture, buttonHoverTexture, dim);
+        }
+
+        private static GUIStyle CreateButtonStyle(Texture2D normal, Texture2D hover, Color textColor)
+        {
+            GUIStyle style = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 13,
+                fontStyle = FontStyle.Bold,
+                padding = new RectOffset(10, 10, 6, 6)
+            };
+            style.normal.background = normal;
+            style.normal.textColor = textColor;
+            style.hover.background = hover;
+            style.hover.textColor = Color.white;
+            style.active.background = hover;
+            style.active.textColor = Color.white;
+            style.focused.background = normal;
+            style.focused.textColor = textColor;
+            return style;
         }
 
         private static void Kick(PlayerSpawner player)
