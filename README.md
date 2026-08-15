@@ -30,9 +30,14 @@ When lower-progress joining is enabled, a client's earlier chapter no longer blo
 
 ## Installation
 
-1. Install BepInEx 5 for Sephiria.
-2. Put `SephiriaTogether.dll` in `BepInEx/plugins` on the host.
-3. Start the game once to generate `BepInEx/config/com.sephiriamods.sephiriatogether.cfg`.
+For beginners, download the Release ZIP whose name contains `with-BepInEx`, then extract every file directly into the Sephiria game root. `winhttp.dll` and `Sephiria.exe` should end up in the same directory.
+
+If BepInEx 5 is already installed:
+
+1. Put `SephiriaTogether.dll` in `BepInEx/plugins` on the host.
+2. Start the game once to generate `BepInEx/config/com.sephiriamods.sephiriatogether.cfg`.
+
+See `INSTALL.md` for bilingual beginner instructions.
 
 The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh mid-run joining does not require the plugin on clients; clients that need the game's automatic reconnect UI should also install it or use `-allow_rejoin`.
 
@@ -86,7 +91,7 @@ Create GitHub Release assets locally:
 .\scripts\package.ps1 -Version 3.3.0
 ```
 
-This creates `artifacts/SephiriaTogether.dll` and `artifacts/SephiriaTogether-3.3.0.zip`. Game assemblies and BepInEx binaries are never included.
+This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.
 
 ## Compatibility
 

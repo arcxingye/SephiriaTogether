@@ -4,6 +4,10 @@
 
 - Allow lower-progress clients to pass the server's between-stage chapter validation without changing their quest saves.
 - Add a host-only F8 action that forces all connected players into the last requested next stage when players are away from the entrance.
+- Redesign the F8 menu with a high-contrast card layout and localized player status controls.
+- Add understandable enemy-scaling presets, live party previews, and collapsible advanced settings.
+- Allow a baseline of zero for testing enemy scaling alone.
+- Add an optional beginner package containing the official BepInEx 5 Windows x64 release and required third-party license notices.
 
 ## 3.2.0
 
