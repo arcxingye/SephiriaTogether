@@ -1,0 +1,32 @@
+# Build output
+bin/
+obj/
+artifacts/
+
+# Local build configuration
+Directory.Build.props
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+# Runtime output
+BepInEx/cache/
+BepInEx/config/
+BepInEx/LogOutput.log
+*.log
+
+# Game files and proprietary assemblies
+Sephiria.exe
+Sephiria_Data/
+MonoBleedingEdge/
+UnityPlayer.dll
+winhttp.dll
+doorstop_config.ini
+.doorstop_version
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
