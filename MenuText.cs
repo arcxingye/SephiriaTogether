@@ -36,7 +36,7 @@ namespace SephiriaTogether
             ["ScalingTiming"] = new[] { "修改后只影响新生成的敌人和之后计算的波次，当前已经出现的怪物不变。", "修改後只影響新生成的敵人和之後計算的波次，目前已出現的怪物不變。", "Changes affect newly spawned enemies and future waves. Existing enemies are unchanged.", "변경 사항은 새로 생성되는 적과 이후 웨이브에만 적용됩니다.", "変更は新しく出現する敵と以降のウェーブにのみ反映されます。" },
             ["ShowAdvanced"] = new[] { "展开高级设置", "展開進階設定", "Show advanced settings", "고급 설정 표시", "詳細設定を表示" },
             ["HideAdvanced"] = new[] { "收起高级设置", "收起進階設定", "Hide advanced settings", "고급 설정 숨기기", "詳細設定を隠す" },
-            ["Baseline"] = new[] { "基准人数", "基準人數", "Baseline players", "기준 인원", "基準人数" },
+            ["Baseline"] = new[] { "不额外增强的人数（单人测试设为 0）", "不額外增強的人數（單人測試設為 0）", "Players without extra scaling (0 to test solo)", "추가 보정 없는 인원 (솔로 테스트는 0)", "追加補正なしの人数（ソロテストは0）" },
             ["ExtraHp"] = new[] { "每名额外玩家增加血量", "每名額外玩家增加血量", "Extra HP per player", "추가 인원당 체력", "追加人数ごとのHP" },
             ["HpCap"] = new[] { "额外血量倍率上限", "額外血量倍率上限", "Extra HP multiplier cap", "추가 체력 배율 상한", "追加HP倍率上限" },
             ["EnemyCount"] = new[] { "增加程序化波次敌人数量", "增加程序化波次敵人數量", "Scale procedural wave enemy count", "절차형 웨이브 적 수 증가", "自動生成ウェーブの敵数を増加" },

@@ -39,7 +39,7 @@ The host must install the plugin. Clients receive synchronized enemy health from
 ## Configuration
 
 - `PlayerLimit`: lobby/network limit, from `2` to `250`. Default: `16`. Applied when creating the next lobby/server.
-- `BaselinePlayers`: player count at or below which no extra multiplier is applied. Default: `4`.
+- `BaselinePlayers`: player count at or below which no extra multiplier is applied. Default: `4`. Set it to `0` in advanced settings to test scaling with one player.
 - `HealthPerExtraPlayer`: health added per player above the baseline. Default: `0.15` (15%).
 - `MaximumExtraMultiplier`: cap on this plugin's multiplier. Default: `8`. Use `0` for no cap.
 - `AllowLowerProgressPlayers`: publish the host lobby as unrestricted by chapter and bypass the local chapter gate when joining. Default: `true`.

@@ -42,8 +42,8 @@ namespace SephiriaTogether
                 "BaselinePlayers",
                 4,
                 new ConfigDescription(
-                    "No extra scaling at or below this player count.",
-                    new AcceptableValueRange<int>(1, 250)));
+                    "No extra scaling at or below this player count. Set to 0 to test scaling alone.",
+                    new AcceptableValueRange<int>(0, 250)));
             healthPerExtraPlayer = Config.Bind(
                 "Scaling",
                 "HealthPerExtraPlayer",
@@ -101,7 +101,7 @@ namespace SephiriaTogether
             ApplyPlayerLimit();
             Logger.LogInfo(
                 $"Enemy scaling loaded: +{Math.Max(0f, healthPerExtraPlayer.Value) * 100f:0.##}% original health " +
-                $"per player above {Math.Max(1, scalingStartsAbove.Value)}. Host only.");
+                $"per player above {Math.Max(0, scalingStartsAbove.Value)}. Host only.");
             Logger.LogInfo(
                 $"Mid-run join={allowMidRunJoin.Value}, catch-up EXP={catchUpExperienceRatio.Value:P0}, " +
                 $"lower-progress join={allowLowerProgressPlayers.Value}.");
@@ -112,7 +112,7 @@ namespace SephiriaTogether
         internal static float MaximumMultiplierValue => maximumMultiplier.Value;
         internal static float EnemyCountPerExtraPlayerValue => enemyCountPerExtraPlayer.Value;
         internal static float MaximumEnemyCountMultiplierValue => maximumEnemyCountMultiplier.Value;
-        internal static void SetBaselinePlayers(int value) => scalingStartsAbove.Value = Mathf.Clamp(value, 1, 250);
+        internal static void SetBaselinePlayers(int value) => scalingStartsAbove.Value = Mathf.Clamp(value, 0, 250);
         internal static void SetHealthPerExtraPlayer(float value) => healthPerExtraPlayer.Value = Mathf.Clamp(value, 0f, 5f);
         internal static void SetMaximumMultiplier(float value) => maximumMultiplier.Value = Mathf.Clamp(value, 0f, 100f);
         internal static void SetEnemyCountPerExtraPlayer(float value) => enemyCountPerExtraPlayer.Value = Mathf.Clamp(value, 0f, 1f);
@@ -178,7 +178,7 @@ namespace SephiriaTogether
             }
 
             int playerCount = CountActivePlayers();
-            int extraPlayers = Math.Max(0, playerCount - Math.Max(1, scalingStartsAbove.Value));
+            int extraPlayers = Math.Max(0, playerCount - Math.Max(0, scalingStartsAbove.Value));
             if (extraPlayers == 0)
             {
                 yield break;
