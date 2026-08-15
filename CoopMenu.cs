@@ -158,14 +158,15 @@ namespace SephiriaTogether
             BeginSection(MenuText.Get("EnemyScaling"));
             GUILayout.Label(MenuText.Get("ScalingHelp"), muted);
             GUILayout.Space(6f);
-            DrawValue(MenuText.Get("CurrentPreset"), GetPresetName());
+            int currentPreset = GetPreset();
+            DrawValue(MenuText.Get("CurrentPreset"), GetPresetName(currentPreset), 150f);
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button(MenuText.Get("PresetOriginal"), button, GUILayout.Height(34f))) ApplyScalingPreset(0);
-            if (GUILayout.Button(MenuText.Get("PresetLight"), button, GUILayout.Height(34f))) ApplyScalingPreset(1);
+            if (GUILayout.Button(MenuText.Get("PresetOriginal"), currentPreset == 0 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(0);
+            if (GUILayout.Button(MenuText.Get("PresetLight"), currentPreset == 1 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(1);
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button(MenuText.Get("PresetStandard"), primaryButton, GUILayout.Height(34f))) ApplyScalingPreset(2);
-            if (GUILayout.Button(MenuText.Get("PresetHigh"), button, GUILayout.Height(34f))) ApplyScalingPreset(3);
+            if (GUILayout.Button(MenuText.Get("PresetStandard"), currentPreset == 2 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(2);
+            if (GUILayout.Button(MenuText.Get("PresetHigh"), currentPreset == 3 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(3);
             GUILayout.EndHorizontal();
             GUILayout.Space(8f);
             int activePlayers = Mathf.Max(1, PlayerSpawner.MultiplayerList != null ? PlayerSpawner.MultiplayerList.Count : 1);
@@ -301,14 +302,20 @@ namespace SephiriaTogether
             Plugin.SaveSettings();
         }
 
-        private static string GetPresetName()
+        private static int GetPreset()
         {
-            if (MatchesScaling(0f, 1f, false, 0f, 1f)) return MenuText.Get("PresetOriginal");
-            if (MatchesScaling(0.1f, 4f, true, 0.04f, 2f)) return MenuText.Get("PresetLight");
-            if (MatchesScaling(0.15f, 8f, true, 0.08f, 3f)) return MenuText.Get("PresetStandard");
-            if (MatchesScaling(0.25f, 12f, true, 0.15f, 4f)) return MenuText.Get("PresetHigh");
-            return MenuText.Get("PresetCustom");
+            if (MatchesScaling(0f, 1f, false, 0f, 1f)) return 0;
+            if (MatchesScaling(0.1f, 4f, true, 0.04f, 2f)) return 1;
+            if (MatchesScaling(0.15f, 8f, true, 0.08f, 3f)) return 2;
+            if (MatchesScaling(0.25f, 12f, true, 0.15f, 4f)) return 3;
+            return -1;
         }
+
+        private static string GetPresetName(int preset) => preset == 0 ? MenuText.Get("PresetOriginal")
+            : preset == 1 ? MenuText.Get("PresetLight")
+            : preset == 2 ? MenuText.Get("PresetStandard")
+            : preset == 3 ? MenuText.Get("PresetHigh")
+            : MenuText.Get("PresetCustom");
 
         private static bool MatchesScaling(float hp, float hpCap, bool countEnabled, float count, float countCap)
         {
@@ -333,12 +340,12 @@ namespace SephiriaTogether
             GUILayout.Space(10f);
         }
 
-        private static void DrawValue(string label, string value)
+        private static void DrawValue(string label, string value, float valueWidth = 76f)
         {
             GUILayout.BeginHorizontal();
             GUILayout.Label(label, body);
             GUILayout.FlexibleSpace();
-            GUILayout.Label(value, badge, GUILayout.Width(76f), GUILayout.Height(28f));
+            GUILayout.Label(value, badge, GUILayout.Width(valueWidth), GUILayout.Height(28f));
             GUILayout.EndHorizontal();
         }
 
@@ -387,6 +394,13 @@ namespace SephiriaTogether
             Color dim = new Color(0.62f, 0.69f, 0.74f);
             windowStyle = new GUIStyle(GUI.skin.window) { padding = new RectOffset(18, 18, 14, 16) };
             windowStyle.normal.background = windowTexture;
+            windowStyle.onNormal.background = windowTexture;
+            windowStyle.hover.background = windowTexture;
+            windowStyle.onHover.background = windowTexture;
+            windowStyle.active.background = windowTexture;
+            windowStyle.onActive.background = windowTexture;
+            windowStyle.focused.background = windowTexture;
+            windowStyle.onFocused.background = windowTexture;
             title = new GUIStyle(GUI.skin.label) { fontSize = 21, fontStyle = FontStyle.Bold, normal = { textColor = text } };
             section = new GUIStyle(GUI.skin.label) { fontSize = 15, fontStyle = FontStyle.Bold, normal = { textColor = new Color(0.55f, 0.9f, 0.95f) } };
             body = new GUIStyle(GUI.skin.label) { fontSize = 13, wordWrap = true, alignment = TextAnchor.MiddleLeft, normal = { textColor = text } };

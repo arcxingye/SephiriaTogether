@@ -27,7 +27,7 @@ namespace SephiriaTogether
             ["CurrentPreset"] = new[] { "当前难度", "目前難度", "Current difficulty", "현재 난이도", "現在の難易度" },
             ["PresetOriginal"] = new[] { "原版（不额外增强）", "原版（不額外增強）", "Original (no extra)", "원본 (추가 없음)", "原版（追加なし）" },
             ["PresetLight"] = new[] { "轻度", "輕度", "Light", "가벼움", "ライト" },
-            ["PresetStandard"] = new[] { "标准（推荐）", "標準（推薦）", "Standard (recommended)", "표준 (권장)", "標準（おすすめ）" },
+            ["PresetStandard"] = new[] { "标准", "標準", "Standard", "표준", "標準" },
             ["PresetHigh"] = new[] { "高压", "高壓", "High pressure", "고압", "高圧" },
             ["PresetCustom"] = new[] { "自定义", "自訂", "Custom", "사용자 설정", "カスタム" },
             ["ScalingPreviewPlayers"] = new[] { "当前队伍：{0} 人", "目前隊伍：{0} 人", "Current party: {0} players", "현재 파티: {0}명", "現在のパーティー：{0}人" },
