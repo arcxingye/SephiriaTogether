@@ -7,52 +7,6 @@ using UnityEngine;
 
 namespace SephiriaTogether
 {
-    internal static class StageTransition
-    {
-        internal static string PendingStageName { get; private set; }
-
-        internal static bool CanForce =>
-            NetworkServer.active &&
-            DungeonManager.Instance != null &&
-            !string.IsNullOrEmpty(PendingStageName) &&
-            DungeonManager.Instance.FindStage(PendingStageName) != null;
-
-        internal static bool ForcePendingStage()
-        {
-            if (!CanForce)
-            {
-                return false;
-            }
-
-            DungeonManager.Instance.LoadStageAndMove(PendingStageName);
-            PendingStageName = null;
-            return true;
-        }
-
-        internal static void Clear() => PendingStageName = null;
-
-        internal static void Remember(string stageName)
-        {
-            if (NetworkServer.active && !string.IsNullOrEmpty(stageName))
-            {
-                PendingStageName = stageName;
-            }
-        }
-    }
-
-    [HarmonyPatch]
-    internal static class StageRequestCapturePatch
-    {
-        private static bool Prepare() => TargetMethod() != null;
-
-        private static MethodBase TargetMethod() => typeof(PlayerAvatar)
-            .GetMethods(AccessTools.all)
-            .FirstOrDefault(method => method.Name.StartsWith("UserCode_CmdMoveStage") &&
-                                      method.GetParameters().Length == 4);
-
-        private static void Prefix(string stageName) => StageTransition.Remember(stageName);
-    }
-
     [HarmonyPatch]
     internal static class DungeonProgressValidationPatch
     {
@@ -75,69 +29,97 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(PlayerAvatar), nameof(PlayerAvatar.ServerLoadStage))]
     internal static class StageProgressRequirementPatch
     {
-        private static void Prefix(string stageName, out Dictionary<PlayerLocalDataStorage, int> __state)
+        private sealed class State
+        {
+            internal readonly Dictionary<PlayerLocalDataStorage, int> Progress =
+                new Dictionary<PlayerLocalDataStorage, int>();
+            internal readonly Dictionary<Transform, Vector3> Positions =
+                new Dictionary<Transform, Vector3>();
+        }
+
+        private static void Prefix(Vector3 requestPosition, out State __state)
         {
             __state = null;
-            StageTransition.Remember(stageName);
-            if (!NetworkServer.active || !Plugin.allowLowerProgressPlayers.Value ||
-                PlayerSpawner.MultiplayerList == null)
+            if (!NetworkServer.active || PlayerSpawner.MultiplayerList == null)
             {
                 return;
             }
 
-            int hostProgress = -1;
-            foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList)
+            __state = new State();
+            if (Plugin.allowLowerProgressPlayers.Value)
             {
-                if (player != null && player.isHost && player.PlayerAvatar != null &&
-                    player.PlayerAvatar.localDataStorage != null)
+                int hostProgress = -1;
+                foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList)
                 {
-                    hostProgress = player.PlayerAvatar.localDataStorage.mainQuestProgress;
-                    break;
+                    if (player != null && player.isHost && player.PlayerAvatar != null &&
+                        player.PlayerAvatar.localDataStorage != null)
+                    {
+                        hostProgress = player.PlayerAvatar.localDataStorage.mainQuestProgress;
+                        break;
+                    }
+                }
+
+                if (hostProgress >= 0)
+                {
+                    foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList)
+                    {
+                        PlayerLocalDataStorage storage = player != null && player.PlayerAvatar != null
+                            ? player.PlayerAvatar.localDataStorage
+                            : null;
+                        if (storage != null && storage.mainQuestProgress < hostProgress)
+                        {
+                            __state.Progress[storage] = storage.mainQuestProgress;
+                            storage.mainQuestProgress = hostProgress;
+                        }
+                    }
                 }
             }
 
-            if (hostProgress < 0)
+            if (Plugin.allowUngroupedStageTransition.Value)
             {
-                return;
-            }
-
-            __state = new Dictionary<PlayerLocalDataStorage, int>();
-            foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList)
-            {
-                PlayerLocalDataStorage storage = player != null && player.PlayerAvatar != null
-                    ? player.PlayerAvatar.localDataStorage
-                    : null;
-                if (storage != null && storage.mainQuestProgress < hostProgress)
+                foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList)
                 {
-                    __state[storage] = storage.mainQuestProgress;
-                    storage.mainQuestProgress = hostProgress;
+                    PlayerAvatar avatar = player != null ? player.PlayerAvatar : null;
+                    if (avatar != null && !avatar.IsDead)
+                    {
+                        __state.Positions[avatar.transform] = avatar.transform.position;
+                        avatar.transform.position = requestPosition;
+                    }
                 }
             }
         }
 
-        private static void Postfix(Dictionary<PlayerLocalDataStorage, int> __state) => Restore(__state);
+        private static void Postfix(State __state) => Restore(__state);
 
-        private static System.Exception Finalizer(System.Exception __exception, Dictionary<PlayerLocalDataStorage, int> __state)
+        private static System.Exception Finalizer(System.Exception __exception, State __state)
         {
             Restore(__state);
             return __exception;
         }
 
-        private static void Restore(Dictionary<PlayerLocalDataStorage, int> state)
+        private static void Restore(State state)
         {
             if (state == null)
             {
                 return;
             }
 
-            foreach (KeyValuePair<PlayerLocalDataStorage, int> entry in state)
+            foreach (KeyValuePair<PlayerLocalDataStorage, int> entry in state.Progress)
             {
                 if (entry.Key != null)
                 {
                     entry.Key.mainQuestProgress = entry.Value;
                 }
             }
-            state.Clear();
+            state.Progress.Clear();
+            foreach (KeyValuePair<Transform, Vector3> entry in state.Positions)
+            {
+                if (entry.Key != null)
+                {
+                    entry.Key.position = entry.Value;
+                }
+            }
+            state.Positions.Clear();
         }
     }
 }

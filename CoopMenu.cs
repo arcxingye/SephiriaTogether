@@ -134,18 +134,8 @@ namespace SephiriaTogether
             GUILayout.EndHorizontal();
             DrawToggle(MenuText.Get("LowerProgress"), Plugin.allowLowerProgressPlayers);
             DrawToggle(MenuText.Get("MidRun"), Plugin.allowMidRunJoin);
-            GUILayout.Space(8f);
-            GUILayout.Label(MenuText.Get("StageTransition"), section);
-            GUILayout.Label(StageTransition.CanForce
-                ? MenuText.Get("PendingStage") + ": " + StageTransition.PendingStageName
-                : MenuText.Get("NoPendingStage"), StageTransition.CanForce ? body : muted);
-            GUI.enabled = StageTransition.CanForce;
-            if (GUILayout.Button(MenuText.Get("ForceNextStage"), primaryButton, GUILayout.Height(38f)))
-            {
-                StageTransition.ForcePendingStage();
-                Toggle();
-            }
-            GUI.enabled = true;
+            DrawToggle(MenuText.Get("UngroupedTransition"), Plugin.allowUngroupedStageTransition);
+            GUILayout.Label(MenuText.Get("UngroupedTransitionHelp"), muted);
             GUILayout.Space(8f);
             DrawValue(MenuText.Get("Catchup"), (Plugin.catchUpExperienceRatio.Value * 100f).ToString("0") + "%");
             if (GUILayout.Button(MenuText.Get("CycleCatchup"), button, GUILayout.Height(34f)))

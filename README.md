@@ -26,7 +26,7 @@ Examples:
 
 The host can press `F8` to open the configuration panel. The player limit is a numeric field rather than a fixed mode; enter a value from 2 to 250 and apply it before creating the next lobby. The menu also configures progress admission, mid-run joining, catch-up rewards and enemy scaling.
 
-When lower-progress joining is enabled, a client's earlier chapter no longer blocks the host from starting the next stage. This only bypasses the server's transition check and does not change the client's quest save. If a player is away from the stage entrance, try the entrance normally once, then use **Force everyone to next stage** in the F8 host menu. The force action uses the game's normal stage loader but ignores the group-distance check.
+When lower-progress joining is enabled, a client's earlier chapter no longer blocks the host from starting the next stage. This only bypasses the server's transition check and does not change the client's quest save. The optional **Do not require everyone at the entrance** setting lets the host use the correct stage entrance normally without gathering every living player nearby. It does not guess or directly force-load a stage.
 
 ## Installation
 
@@ -88,7 +88,7 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
-.\scripts\package.ps1 -Version 3.3.0
+.\scripts\package.ps1 -Version 3.3.1
 ```
 
 This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.

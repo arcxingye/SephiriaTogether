@@ -14,13 +14,14 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.3.0";
+        public const string PluginVersion = "3.3.1";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> healthPerExtraPlayer;
         private static ConfigEntry<float> maximumMultiplier;
         internal static ConfigEntry<bool> allowLowerProgressPlayers;
         internal static ConfigEntry<bool> allowMidRunJoin;
+        internal static ConfigEntry<bool> allowUngroupedStageTransition;
         internal static ConfigEntry<float> catchUpExperienceRatio;
         internal static ConfigEntry<bool> scaleEnemyCount;
         internal static ConfigEntry<float> enemyCountPerExtraPlayer;
@@ -68,6 +69,11 @@ namespace SephiriaTogether
                 "AllowMidRunJoin",
                 true,
                 "Allow new players to join after the host has started a dungeon. Existing players still use the normal reconnect path.");
+            allowUngroupedStageTransition = Config.Bind(
+                "Multiplayer",
+                "AllowUngroupedStageTransition",
+                false,
+                "Allow the host to use a stage entrance without gathering every living player nearby.");
             catchUpExperienceRatio = Config.Bind(
                 "Multiplayer",
                 "CatchUpExperienceRatio",
@@ -139,7 +145,6 @@ namespace SephiriaTogether
             CoopMenu.Close();
             harmony?.UnpatchSelf();
             MidRunJoin.ClearConnections();
-            StageTransition.Clear();
         }
 
         private void OnGUI() => CoopMenu.Draw();

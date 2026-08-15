@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.3.1
+
+- Remove the unsafe force-next-stage action, which could regenerate the current stage.
+- Add an optional host setting that bypasses only the living-player distance check when the host uses the correct stage entrance normally.
+
 ## 3.3.0
 
 - Allow lower-progress clients to pass the server's between-stage chapter validation without changing their quest saves.
