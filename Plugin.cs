@@ -22,6 +22,8 @@ namespace SephiriaTogether
         internal static ConfigEntry<bool> allowLowerProgressPlayers;
         internal static ConfigEntry<bool> allowMidRunJoin;
         internal static ConfigEntry<bool> allowUngroupedStageTransition;
+        internal static ConfigEntry<bool> breathingHeal;
+        internal static ConfigEntry<bool> friendlyFire;
         internal static ConfigEntry<float> catchUpExperienceRatio;
         internal static ConfigEntry<bool> scaleEnemyCount;
         internal static ConfigEntry<float> enemyCountPerExtraPlayer;
@@ -74,6 +76,16 @@ namespace SephiriaTogether
                 "AllowUngroupedStageTransition",
                 false,
                 "Allow the host to use a stage entrance without gathering every living player nearby.");
+            breathingHeal = Config.Bind(
+                "Multiplayer",
+                "BreathingHeal",
+                false,
+                "Allow players to recover HP after leaving combat. Host-only; clients do not need the plugin.");
+            friendlyFire = Config.Bind(
+                "Multiplayer",
+                "FriendlyFire",
+                false,
+                "Allow player attacks to damage other players. Damage is reduced to 1%, with 1 minimum and 5 maximum per hit.");
             catchUpExperienceRatio = Config.Bind(
                 "Multiplayer",
                 "CatchUpExperienceRatio",
@@ -146,6 +158,7 @@ namespace SephiriaTogether
             CoopMenu.Close();
             harmony?.UnpatchSelf();
             MidRunJoin.ClearConnections();
+            BreathingHealPatch.Clear();
         }
 
         private void OnGUI() => CoopMenu.Draw();

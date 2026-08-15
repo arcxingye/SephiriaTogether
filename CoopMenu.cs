@@ -136,13 +136,13 @@ namespace SephiriaTogether
             DrawToggle(MenuText.Get("MidRun"), Plugin.allowMidRunJoin);
             DrawToggle(MenuText.Get("UngroupedTransition"), Plugin.allowUngroupedStageTransition);
             GUILayout.Label(MenuText.Get("UngroupedTransitionHelp"), muted);
+            DrawToggle(MenuText.Get("BreathingHeal"), Plugin.breathingHeal);
+            GUILayout.Label(MenuText.Get("BreathingHealHelp"), muted);
+            DrawToggle(MenuText.Get("FriendlyFire"), Plugin.friendlyFire);
+            GUILayout.Label(MenuText.Get("FriendlyFireHelp"), muted);
             GUILayout.Space(8f);
-            DrawValue(MenuText.Get("Catchup"), (Plugin.catchUpExperienceRatio.Value * 100f).ToString("0") + "%");
-            if (GUILayout.Button(MenuText.Get("CycleCatchup"), button, GUILayout.Height(34f)))
-            {
-                float value = Plugin.catchUpExperienceRatio.Value;
-                Plugin.catchUpExperienceRatio.Value = value < 0.01f ? 0.5f : value < 0.51f ? 0.75f : value < 0.76f ? 1f : 0f;
-            }
+            DrawToggle(MenuText.Get("Catchup"), Plugin.catchUpExperienceRatio.Value > 0.5f,
+                () => Plugin.catchUpExperienceRatio.Value = Plugin.catchUpExperienceRatio.Value > 0.5f ? 0f : 1f);
             EndSection();
 
             BeginSection(MenuText.Get("EnemyScaling"));
@@ -341,13 +341,17 @@ namespace SephiriaTogether
 
         private static void DrawToggle(string label, BepInEx.Configuration.ConfigEntry<bool> setting)
         {
+            DrawToggle(label, setting.Value, () => setting.Value = !setting.Value);
+        }
+
+        private static void DrawToggle(string label, bool enabled, System.Action toggle)
+        {
             GUILayout.BeginHorizontal();
             GUILayout.Label(label, body);
             GUILayout.FlexibleSpace();
-            bool enabled = setting.Value;
             if (GUILayout.Button(enabled ? "ON" : "OFF", enabled ? toggleOn : toggleOff, GUILayout.Width(72f), GUILayout.Height(30f)))
             {
-                setting.Value = !enabled;
+                toggle();
             }
             GUILayout.EndHorizontal();
         }

@@ -41,6 +41,8 @@ See `INSTALL.md` for bilingual beginner instructions.
 
 The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh mid-run joining does not require the plugin on clients; clients that need the game's automatic reconnect UI should also install it or use `-allow_rejoin`.
 
+The optional delayed healing is host-authoritative. Players do not heal for 10 seconds after taking damage, then recover at a fixed 1 HP/s, including during combat. It uses the game's normal HP synchronization, so clients do not need the plugin.
+
 ## Configuration
 
 - `PlayerLimit`: lobby/network limit, from `2` to `250`. Default: `16`. Applied when creating the next lobby/server.
