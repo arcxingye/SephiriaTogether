@@ -14,7 +14,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.2.0";
+        public const string PluginVersion = "3.3.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> healthPerExtraPlayer;
@@ -139,6 +139,7 @@ namespace SephiriaTogether
             CoopMenu.Close();
             harmony?.UnpatchSelf();
             MidRunJoin.ClearConnections();
+            StageTransition.Clear();
         }
 
         private void OnGUI() => CoopMenu.Draw();

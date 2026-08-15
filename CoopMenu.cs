@@ -96,6 +96,17 @@ namespace SephiriaTogether
             }
             Plugin.allowLowerProgressPlayers.Value = GUILayout.Toggle(Plugin.allowLowerProgressPlayers.Value, MenuText.Get("LowerProgress"));
             Plugin.allowMidRunJoin.Value = GUILayout.Toggle(Plugin.allowMidRunJoin.Value, MenuText.Get("MidRun"));
+            GUILayout.Label(MenuText.Get("StageTransition"), section);
+            GUILayout.Label(StageTransition.CanForce
+                ? MenuText.Get("PendingStage") + ": " + StageTransition.PendingStageName
+                : MenuText.Get("NoPendingStage"));
+            GUI.enabled = StageTransition.CanForce;
+            if (GUILayout.Button(MenuText.Get("ForceNextStage")))
+            {
+                StageTransition.ForcePendingStage();
+                Toggle();
+            }
+            GUI.enabled = true;
             GUILayout.Label(MenuText.Get("Catchup") + ": " + (Plugin.catchUpExperienceRatio.Value * 100f).ToString("0") + "%");
             if (GUILayout.Button(MenuText.Get("CycleCatchup")))
             {

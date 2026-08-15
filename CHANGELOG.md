@@ -1,5 +1,10 @@
 # Changelog
 
+## 3.3.0
+
+- Allow lower-progress clients to pass the server's between-stage chapter validation without changing their quest saves.
+- Add a host-only F8 action that forces all connected players into the last requested next stage when players are away from the entrance.
+
 ## 3.2.0
 
 - Identify reconnecting players from the host's Steam transport identity.
