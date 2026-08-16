@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using BepInEx.Logging;
 using HarmonyLib;
@@ -114,6 +115,7 @@ namespace SephiriaTogether
             if (connection != null)
             {
                 FreshConnections.Remove(connection);
+                CatchUpRewards.RemoveConnection(connection);
             }
         }
 
@@ -126,19 +128,20 @@ namespace SephiriaTogether
         internal static void ScheduleCatchUp(PlayerSpawner spawner)
         {
             if (!NetworkServer.active || spawner == null || spawner.connectionToClient == null ||
-                !Plugin.allowMidRunJoin.Value || !FreshConnections.Remove(spawner.connectionToClient))
+                !Plugin.allowMidRunJoin.Value)
             {
                 return;
             }
 
+            bool isFresh = FreshConnections.Remove(spawner.connectionToClient);
             bool isRejoin = RejoinDetectedField != null && (bool)RejoinDetectedField.GetValue(spawner);
-            if (!isRejoin && Plugin.InstanceForPatches != null)
+            if ((isFresh || isRejoin) && Plugin.InstanceForPatches != null)
             {
-                Plugin.InstanceForPatches.StartCoroutine(CatchUpAfterTravel(spawner));
+                Plugin.InstanceForPatches.StartCoroutine(CatchUpAfterTravel(spawner, isRejoin));
             }
         }
 
-        private static IEnumerator CatchUpAfterTravel(PlayerSpawner spawner)
+        private static IEnumerator CatchUpAfterTravel(PlayerSpawner spawner, bool isRejoin)
         {
             float deadline = Time.realtimeSinceStartup + 20f;
             while (spawner != null && spawner.PlayerAvatar != null &&
@@ -166,7 +169,30 @@ namespace SephiriaTogether
                 yield break;
             }
 
+            PlayerSpawner routeSource = PlayerSpawner.MultiplayerList
+                .Where(peer => peer != null && peer != spawner && peer.PlayerAvatar != null)
+                .OrderByDescending(peer => peer.PlayerAvatar.floorTravelHistory.Count)
+                .ThenByDescending(peer => peer.isHost)
+                .FirstOrDefault();
+            HashSet<string> newcomerHistory = new HashSet<string>(spawner.PlayerAvatar.floorTravelHistory);
+            List<string> missedFloors = routeSource != null
+                ? routeSource.PlayerAvatar.floorTravelHistory
+                    .Where(guid => !string.IsNullOrEmpty(guid) && !newcomerHistory.Contains(guid))
+                    .Distinct()
+                    .ToList()
+                : new List<string>();
+            bool grantResources = CatchUpRewards.HasNewResourceFloors(spawner, missedFloors);
+            CatchUpRewards.Prepare(spawner);
+            if (isRejoin && missedFloors.Count == 0)
+            {
+                Log?.LogInfo($"Rejoin catch-up not needed for {spawner.PlayerAvatar.name}.");
+                yield break;
+            }
+
             List<int> peerExperience = new List<int>();
+            List<int> peerMoney = new List<int>();
+            List<int> peerDice = new List<int>();
+            List<int> peerMaxDice = new List<int>();
             foreach (PlayerSpawner peer in PlayerSpawner.MultiplayerList)
             {
                 if (peer == null || peer == spawner || peer.PlayerAvatar == null ||
@@ -181,28 +207,58 @@ namespace SephiriaTogether
                 {
                     peerExperience.Add(Math.Max(0, level.currentExp));
                 }
+                peerMoney.Add(Math.Max(0, peer.PlayerAvatar.Money));
+                peerDice.Add(Math.Max(0, peer.PlayerAvatar.rerollDice));
+                peerMaxDice.Add(Math.Max(0, peer.PlayerAvatar.maxRerollDice));
             }
 
-            if (peerExperience.Count == 0)
+            if (grantResources && peerExperience.Count > 0)
             {
-                yield break;
+                int target = Mathf.FloorToInt(Median(peerExperience) * Plugin.catchUpExperienceRatio.Value);
+                int amount = Math.Max(0, target - newcomer.currentExp);
+                if (amount > 0)
+                {
+                    newcomer.AddExp(amount);
+                    Log?.LogInfo(
+                        $"Granted {amount} catch-up EXP to {spawner.PlayerAvatar.name} " +
+                        $"(target {target}).");
+                }
             }
 
-            peerExperience.Sort();
-            int middle = peerExperience.Count / 2;
-            int median = peerExperience.Count % 2 == 0
-                ? (int)(((long)peerExperience[middle - 1] + peerExperience[middle]) / 2L)
-                : peerExperience[middle];
-            int target = Mathf.FloorToInt(median * Plugin.catchUpExperienceRatio.Value);
-            int amount = Math.Max(0, target - newcomer.currentExp);
-            if (amount > 0)
+            int money = grantResources ? Math.Max(0, Median(peerMoney) - spawner.PlayerAvatar.Money) : 0;
+            int maxDice = grantResources ? Math.Max(0, Median(peerMaxDice) - spawner.PlayerAvatar.maxRerollDice) : 0;
+            int dice = grantResources ? Math.Max(0, Median(peerDice) - spawner.PlayerAvatar.rerollDice) : 0;
+            if (money > 0) spawner.PlayerAvatar.AddMoney(money);
+            if (maxDice > 0) spawner.PlayerAvatar.AddMaxDice(maxDice);
+            if (dice > 0) spawner.PlayerAvatar.AddDice(dice);
+
+            int[] pocketItems = spawner.LocalDataStorage != null
+                ? spawner.LocalDataStorage.dimensionPocketItem.ToArray()
+                : null;
+            if (!isRejoin && pocketItems != null && pocketItems.Length > 0)
             {
-                newcomer.AddExp(amount);
-                Log?.LogInfo(
-                    $"Granted {amount} catch-up EXP to {spawner.PlayerAvatar.name} " +
-                    $"(target {target}, peer median {median}).");
+                spawner.AddDimensionPocketItemsOnServer(pocketItems);
             }
 
+            if (grantResources) CatchUpRewards.CommitResourceFloors(spawner, missedFloors);
+            spawner.SaveCurrentSessionData();
+            SaveManager.Save(saveCurrent: false, saveCurrentRun: true);
+
+            Log?.LogInfo(
+                $"{(isRejoin ? "Rejoin" : "Fresh-join")} resources for {spawner.PlayerAvatar.name}: " +
+                $"missed floors {missedFloors.Count}, money +{money}, " +
+                $"dice +{dice}, max dice +{maxDice}, " +
+                $"pocket items {(isRejoin ? 0 : pocketItems?.Length ?? 0)}.");
+        }
+
+        private static int Median(List<int> values)
+        {
+            if (values == null || values.Count == 0) return 0;
+            values.Sort();
+            int middle = values.Count / 2;
+            return values.Count % 2 == 0
+                ? (int)(((long)values[middle - 1] + values[middle]) / 2L)
+                : values[middle];
         }
     }
 
@@ -248,6 +304,7 @@ namespace SephiriaTogether
     {
         private static bool Prefix(ref bool __result)
         {
+            if (!Plugin.allowMidRunJoin.Value) return true;
             __result = true;
             return false;
         }
@@ -284,6 +341,7 @@ namespace SephiriaTogether
             {
                 LobbyData lobby = lobbyManager.Lobby;
                 lobby["pw"] = "open";
+                lobby["SephiriaTogether"] = Plugin.PluginVersion;
                 if (Plugin.allowLowerProgressPlayers.Value)
                 {
                     lobby["Chapter"] = "0";

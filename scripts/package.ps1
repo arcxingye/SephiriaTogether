@@ -1,6 +1,6 @@
 param(
     [string]$GameDir = $env:SEPHIRIA_DIR,
-    [string]$Version = "3.3.1"
+    [string]$Version = "3.4.0"
 )
 
 $ErrorActionPreference = "Stop"
@@ -34,10 +34,13 @@ if (Test-Path -LiteralPath $zip) {
 }
 
 Compress-Archive -Path "$staging\*" -DestinationPath $zip -CompressionLevel Optimal
+$latestZip = Join-Path $artifacts "SephiriaTogether.zip"
+Copy-Item -LiteralPath $zip -Destination $latestZip -Force
 Copy-Item -LiteralPath "$projectRoot\bin\Release\netstandard2.1\SephiriaTogether.dll" `
     -Destination (Join-Path $artifacts "SephiriaTogether.dll")
 
 Write-Output "Created: $zip"
+Write-Output "Created: $latestZip"
 
 if (!(Test-Path -LiteralPath $bepInExArchive) -or
     (Get-FileHash -LiteralPath $bepInExArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $bepInExSha256) {

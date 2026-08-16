@@ -6,7 +6,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>SephiriaTogether</AssemblyName>
     <RootNamespace>SephiriaTogether</RootNamespace>
-    <Version>3.3.1</Version>
+    <Version>3.4.0</Version>
     <GameDir Condition="'$(GameDir)' == '' and '$(SEPHIRIA_DIR)' != ''">$(SEPHIRIA_DIR)</GameDir>
   </PropertyGroup>
 

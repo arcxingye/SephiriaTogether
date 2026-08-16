@@ -14,7 +14,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.3.1";
+        public const string PluginVersion = "3.4.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> healthPerExtraPlayer;
@@ -29,6 +29,9 @@ namespace SephiriaTogether
         internal static ConfigEntry<float> enemyCountPerExtraPlayer;
         internal static ConfigEntry<float> maximumEnemyCountMultiplier;
         internal static ConfigEntry<int> playerLimit;
+        internal static ConfigEntry<KeyboardShortcut> menuShortcut;
+        internal static ConfigEntry<KeyboardShortcut> rescueShortcut;
+        internal static ConfigEntry<bool> autoReviveWhenClear;
         private Harmony harmony;
 
         private void Awake()
@@ -40,6 +43,21 @@ namespace SephiriaTogether
                 new ConfigDescription(
                     "Maximum lobby and network player count.",
                     new AcceptableValueRange<int>(2, 250)));
+            menuShortcut = Config.Bind(
+                "Interface",
+                "MenuShortcut",
+                new KeyboardShortcut(KeyCode.F8),
+                "Shortcut used to open and close the Sephiria Together menu.");
+            rescueShortcut = Config.Bind(
+                "Interface",
+                "RescueShortcut",
+                new KeyboardShortcut(KeyCode.R),
+                "Shortcut a downed player uses to request rescue from modded teammates.");
+            autoReviveWhenClear = Config.Bind(
+                "Multiplayer",
+                "AutoReviveWhenClear",
+                false,
+                "Automatically revive all downed players at 50% HP after no living hostile enemies remain.");
             scalingStartsAbove = Config.Bind(
                 "Scaling",
                 "BaselinePlayers",
@@ -156,19 +174,28 @@ namespace SephiriaTogether
         private void OnDestroy()
         {
             CoopMenu.Close();
+            CoopMenu.ResetClientCompensation();
             harmony?.UnpatchSelf();
             MidRunJoin.ClearConnections();
             BreathingHealPatch.Clear();
+            AutoRevivePatch.Clear();
+            CatchUpRewards.ClearClientState();
+            CatchUpRewards.ClearServerState();
         }
 
-        private void OnGUI() => CoopMenu.Draw();
+        private void OnGUI()
+        {
+            RescueAlerts.Draw();
+            CoopMenu.Draw();
+        }
 
         private void Update()
         {
-            if (Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
+            if (!CoopMenu.IsCapturingShortcut && menuShortcut.Value.IsDown())
             {
                 CoopMenu.Toggle();
             }
+            if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)

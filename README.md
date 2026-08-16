@@ -30,6 +30,13 @@ When lower-progress joining is enabled, a client's earlier chapter no longer blo
 
 ## Installation
 
+Download links:
+
+- [Latest Release](https://github.com/arcxingye/SephiriaTogether/releases/latest)
+- [Latest plugin ZIP](https://github.com/arcxingye/SephiriaTogether/releases/latest/download/SephiriaTogether.zip)
+
+The F8 menu's Diagnostics tab also opens the Release page and plugin ZIP links. The beginner package remains available from the Latest Release page for first-time installations.
+
 For beginners, download the Release ZIP whose name contains `with-BepInEx`, then extract every file directly into the Sephiria game root. `winhttp.dll` and `Sephiria.exe` should end up in the same directory.
 
 If BepInEx 5 is already installed:
@@ -42,6 +49,22 @@ See `INSTALL.md` for bilingual beginner instructions.
 The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh mid-run joining does not require the plugin on clients; clients that need the game's automatic reconnect UI should also install it or use `-allow_rejoin`.
 
 The optional delayed healing is host-authoritative. Players do not heal for 10 seconds after taking damage, then recover at a fixed 1 HP/s, including during combat. It uses the game's normal HP synchronization, so clients do not need the plugin.
+
+Fresh mid-run players are caught up to the same-floor party median for money, current dice, and maximum dice, receive expansions from missed Inventory Storage floors, and receive their own Dimension Pocket items. These grants are host-side and do not require the client plugin. If both host and client use Sephiria Together, the client menu also exposes host-validated weapon upgrades, enchants, Charms, Miracles, Stone Tablets, and boss reward choices inferred from missed route floors.
+
+Disconnected players receive the same route-difference catch-up if they rejoin after the party has advanced. Immediate rejoins with no missed floors receive nothing, and Dimension Pocket items are never granted again on rejoin.
+
+Weapon-upgrade, enchant, Charm, Miracle, Stone Tablet, and boss reward entitlements are stored by the host in the current run under a hashed player identity. Pending choices survive disconnects and game restarts, counted route floors cannot generate the same entitlement twice, and every successful claim is deducted and saved immediately. The client F8 panel shows host confirmation and the number of choices already claimed this run. Miracle catch-up offers a stable host-generated set of three choices. Charm, Tablet, and boss claims create vanilla owner-authority Sephirite rewards, so their final item selection still uses the game's normal server validation.
+
+The base game does not save the exact unclaimed Miracle, Tablet, or boss candidate payload after a floor is unloaded. Historical catch-up therefore creates a deterministic equivalent offer; it does not claim to restore the exact candidates that were visible on the missed floor.
+
+Missed HP floors apply the vanilla 60% heal, Max HP floors grant the vanilla `MAX_HP_NORATIO/20` status and heal 20 HP, Sapphire floors grant one run Sapphire, and inventory floors grant one slot up to the vanilla cap. These use vanilla synchronized server state and work for clients without the plugin. The host never sends custom compensation messages to a client until that client completes the Sephiria Together handshake; selectable entitlements for unmodded clients remain saved instead of being discarded or chosen automatically.
+
+The menu is organized into Rules, Compensation, Diagnostics, and History tabs. Its shortcut is configurable through the BepInEx setting `Interface/MenuShortcut`, defaulting to `F8`; modifier keys are supported by the BepInEx `KeyboardShortcut` format.
+
+Modded clients show a prominent banner when a teammate's synchronized `IsDead` state changes to downed. A downed player can press the configurable `Interface/RescueShortcut` (default `R`) to ask other modded players for rescue. The host verifies that the sender is actually downed and limits requests to once every 10 seconds. Unmodded clients receive no custom rescue messages.
+
+The optional `Multiplayer/AutoReviveWhenClear` setting is host-authoritative and works for unmodded clients. When no living hostile non-dummy units remain and surviving players are out of combat for two seconds, all downed players revive at 50% max HP. If the final player falls after the room is already clear, the same enemy check runs before vanilla game over and revives the party immediately; active enemies always preserve the original game-over behavior.
 
 ## Configuration
 
@@ -68,7 +91,7 @@ When the host has this option enabled, players who have already unlocked multipl
 
 The plugin keeps the version check and race-specific multiplayer block. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
 
-Fresh mid-run players follow the game's existing floor join behavior: normally they enter at the host floor's spawn point; during a boss fight the game places them near the host. EXP catch-up uses the normal `AddExp` path, so level-up Sephirite choices, level-derived inventory expansion and other level-up effects are generated exactly as they are for earned experience. Weapons are never upgraded automatically because doing so would choose a build path for the player. Historical anvils, Miracles and Boss choice rewards require a dedicated entitlement ledger and per-player selection UI before they can be restored safely.
+Fresh mid-run players follow the game's existing floor join behavior: normally they enter at the host floor's spawn point; during a boss fight the game places them near the host. EXP catch-up uses the normal `AddExp` path, so level-up Sephirite choices, level-derived inventory expansion and other level-up effects are generated exactly as they are for earned experience. Weapons are never upgraded automatically because doing so would choose a build path for the player; selectable rewards are retained in the host entitlement ledger for the client menu.
 
 Fresh mid-run joining requires a current run using the game's per-player save format (`SaveVersion != 0`). Legacy single-player run saves are rejected for fresh mid-run joining to prevent overwriting existing run data. Set the options before starting the run; changing lobby-related options during an active run does not retroactively update Steam lobby metadata.
 
@@ -90,7 +113,7 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
-.\scripts\package.ps1 -Version 3.3.1
+.\scripts\package.ps1 -Version 3.4.0
 ```
 
 This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.

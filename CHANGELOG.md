@@ -1,5 +1,20 @@
 # Changelog
 
+## 3.4.0
+
+- Add host-side fresh-join catch-up for median money, dice, max dice, missed inventory expansions, and the joining player's Dimension Pocket items.
+- Apply route-difference catch-up when a disconnected player rejoins after the party has advanced, without granting Dimension Pocket items again.
+- Add a client F8 compensation panel for host-validated missed weapon-upgrade and enchant choices when both sides run the mod.
+- Persist pending and claimed compensation choices per player in the current run, deduplicate counted floors, and show claim status and history to clients.
+- Compensate missed HP, Max HP, Sapphire, and inventory floors through vanilla server state, and add persisted Charm, Miracle, Stone Tablet, and boss reward entitlements.
+- Keep unmodded clients compatible by sending no custom protocol messages before a successful mod handshake; their selectable entitlements remain saved.
+- Reconstruct deterministic equivalent choices when the base game has already discarded the original unloaded-floor candidate payload.
+- Split the menu into Rules, Compensation, Diagnostics, and History tabs, add a configurable BepInEx menu shortcut, and expose host rules, connection diagnostics, and persisted catch-up history.
+- Add prominent synchronized downed-player rescue banners and a configurable, server-validated rescue-request shortcut with per-player rate limiting.
+- Add an optional host-authoritative clear-room auto-revive that restores all downed players at 50% HP and prevents game over only when no living hostile units remain.
+- Do not auto-revive or intercept game over while the host is deliberately giving up or leaving the run.
+- Show the game's runtime normal, miniboss, and boss multiplayer HP constants plus the active hard-mode HP and damage modifiers in Rules and Diagnostics.
+
 ## 3.3.1
 
 - Add optional host-only breathing HP recovery after combat.

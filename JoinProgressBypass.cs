@@ -67,16 +67,15 @@ namespace SephiriaTogether
 
         private static void Postfix(UI_MultiplayerPanel __instance)
         {
-            if (!Plugin.allowLowerProgressPlayers.Value)
-            {
-                return;
-            }
-
             LobbyManager manager = NetworkLobbyField?.GetValue(__instance) as LobbyManager;
             if (manager != null && manager.HasLobby && manager.Lobby.IsOwner)
             {
                 LobbyData lobby = manager.Lobby;
-                lobby["Chapter"] = "0";
+                lobby["SephiriaTogether"] = Plugin.PluginVersion;
+                if (Plugin.allowLowerProgressPlayers.Value)
+                {
+                    lobby["Chapter"] = "0";
+                }
             }
         }
     }

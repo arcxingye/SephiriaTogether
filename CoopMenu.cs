@@ -1,5 +1,8 @@
 using UnityEngine;
 using Mirror;
+using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace SephiriaTogether
 {
@@ -37,6 +40,12 @@ namespace SephiriaTogether
         private static string playerLimitText;
         private static Vector2 scroll;
         private static bool showAdvancedScaling;
+        private static int selectedTab;
+        private static int hostRulesTab;
+        private static int capturingShortcut;
+
+        internal static bool IsCapturingShortcut => capturingShortcut != 0;
+        internal static bool IsOpen => open;
 
         internal static void Toggle()
         {
@@ -77,6 +86,7 @@ namespace SephiriaTogether
         internal static void Draw()
         {
             if (!open || !Application.isPlaying) return;
+            CaptureShortcutInput();
             if ((blockedController == null || !blockedController.HasAvatar) &&
                 PlayerInputController.Instance != null && PlayerInputController.Instance.HasAvatar)
             {
@@ -105,14 +115,17 @@ namespace SephiriaTogether
             if (GUILayout.Button("X", button, GUILayout.Width(36f), GUILayout.Height(32f))) Close();
             GUILayout.EndHorizontal();
             DrawDivider();
+            DrawTabs();
             if (!NetworkServer.active)
             {
-                GUILayout.Space(10f);
-                GUILayout.BeginVertical(card);
-                GUILayout.Label(MenuText.Get("HostOnly"), body);
-                GUILayout.Space(8f);
-                if (GUILayout.Button(MenuText.Get("Close"), primaryButton, GUILayout.Height(36f))) Close();
+                DrawClientPage();
                 GUILayout.EndVertical();
+                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
+                return;
+            }
+            if (selectedTab != 0)
+            {
+                DrawHostPage();
                 GUILayout.EndVertical();
                 GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
                 return;
@@ -120,8 +133,35 @@ namespace SephiriaTogether
             scroll = GUILayout.BeginScrollView(scroll);
             GUILayout.Space(8f);
             GUILayout.Label(MenuText.Get("NextSpawn"), muted);
+            DrawValue(MenuText.Get("MenuShortcut"), Plugin.menuShortcut.Value.ToString(), 180f);
+            if (capturingShortcut == 1)
+            {
+                GUILayout.Label(MenuText.Get("PressNewShortcut"), muted);
+                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
+                {
+                    capturingShortcut = 0;
+                }
+            }
+            else if (GUILayout.Button(MenuText.Get("ChangeShortcut"), button, GUILayout.Height(30f)))
+            {
+                capturingShortcut = 1;
+            }
+            DrawValue(MenuText.Get("RescueShortcut"), Plugin.rescueShortcut.Value.ToString(), 180f);
+            if (capturingShortcut == 2)
+            {
+                GUILayout.Label(MenuText.Get("PressNewRescueShortcut"), muted);
+                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f))) capturingShortcut = 0;
+            }
+            else if (GUILayout.Button(MenuText.Get("ChangeRescueShortcut"), button, GUILayout.Height(30f)))
+            {
+                capturingShortcut = 2;
+            }
             GUILayout.Space(10f);
 
+            DrawHostRuleTabs();
+
+            if (hostRulesTab == 0)
+            {
             BeginSection(MenuText.Get("Multiplayer"));
             GUILayout.Label(MenuText.Get("PlayerLimit"), body);
             GUILayout.BeginHorizontal();
@@ -138,15 +178,23 @@ namespace SephiriaTogether
             GUILayout.Label(MenuText.Get("UngroupedTransitionHelp"), muted);
             DrawToggle(MenuText.Get("BreathingHeal"), Plugin.breathingHeal);
             GUILayout.Label(MenuText.Get("BreathingHealHelp"), muted);
+            DrawToggle(MenuText.Get("AutoReviveWhenClear"), Plugin.autoReviveWhenClear);
+            GUILayout.Label(MenuText.Get("AutoReviveWhenClearHelp"), muted);
             DrawToggle(MenuText.Get("FriendlyFire"), Plugin.friendlyFire);
             GUILayout.Label(MenuText.Get("FriendlyFireHelp"), muted);
             GUILayout.Space(8f);
             DrawToggle(MenuText.Get("Catchup"), Plugin.catchUpExperienceRatio.Value > 0.5f,
                 () => Plugin.catchUpExperienceRatio.Value = Plugin.catchUpExperienceRatio.Value > 0.5f ? 0f : 1f);
             EndSection();
+            }
 
+            if (hostRulesTab == 1)
+            {
             BeginSection(MenuText.Get("EnemyScaling"));
             GUILayout.Label(MenuText.Get("ScalingHelp"), muted);
+            GUILayout.Space(6f);
+            GUILayout.Label(MenuText.Get("VanillaScaling"), section);
+            GUILayout.Label(CatchUpRewards.BuildOriginalScalingSummary(), body);
             GUILayout.Space(6f);
             int currentPreset = GetPreset();
             DrawValue(MenuText.Get("CurrentPreset"), GetPresetName(currentPreset), 150f);
@@ -211,8 +259,12 @@ namespace SephiriaTogether
             GUILayout.EndHorizontal();
             }
             EndSection();
+            }
 
-            DrawPlayers();
+            if (hostRulesTab == 2)
+            {
+                DrawPlayers();
+            }
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(MenuText.Get("Save"), primaryButton, GUILayout.Height(38f))) Plugin.SaveSettings();
@@ -222,6 +274,267 @@ namespace SephiriaTogether
             GUILayout.EndScrollView();
             GUILayout.EndVertical();
             GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
+        }
+
+        private static void DrawClientCompensation()
+        {
+            PlayerAvatar player = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
+            if (player == null || player.spawner == null)
+            {
+                GUILayout.Space(10f);
+                GUILayout.BeginVertical(card);
+                GUILayout.Label(MenuText.Get("ClientWaiting"), body);
+                GUILayout.EndVertical();
+                return;
+            }
+
+            CatchUpRewards.SendHello();
+            scroll = GUILayout.BeginScrollView(scroll);
+            GUILayout.Space(8f);
+            BeginSection(MenuText.Get("ClientCompensation"));
+            GUILayout.Label(MenuText.Get("ClientAutoGranted"), muted);
+            if (CatchUpRewards.ClientClaimPending)
+            {
+                GUILayout.Label(MenuText.Get("ClaimPending"), muted);
+            }
+            else if (CatchUpRewards.ClientLastResult == 1)
+            {
+                GUILayout.Label(MenuText.Get("ClaimSuccess"), body);
+            }
+            else if (CatchUpRewards.ClientLastResult == 2)
+            {
+                GUILayout.Label(MenuText.Get("ClaimRejected"), muted);
+            }
+            DrawValue(MenuText.Get("WeaponCredits"), CatchUpRewards.ClientWeaponCredits.ToString());
+            if (CatchUpRewards.ClientWeaponCredits > 0)
+            {
+                WeaponControllerSimple controller = player.GetComponent<WeaponControllerSimple>();
+                WeaponSimple weapon = controller != null ? controller.currentWeapon : null;
+                List<EnhancementMetadata> choices = weapon != null
+                    ? WeaponDatabase.GetWeaponEnhancements(weapon.entityId)
+                    : null;
+                if (choices != null)
+                {
+                    foreach (EnhancementMetadata choice in choices)
+                    {
+                        if (choice == null || !choice.enabled || choice.enhanced == null) continue;
+                        if (GUILayout.Button(choice.enhanced.Name, primaryButton, GUILayout.Height(34f)))
+                        {
+                            CatchUpRewards.ClaimWeapon(choice.enhanced.id);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            GUILayout.Space(8f);
+            DrawValue(MenuText.Get("EnchantCredits"), CatchUpRewards.ClientEnchantCredits.ToString());
+            if (CatchUpRewards.ClientEnchantCredits > 0 && player.Inventory != null)
+            {
+                foreach (KeyValuePair<ItemPosition, NewItemOwnInstance> entry in player.Inventory.inventoryMatrix)
+                {
+                    NewItemOwnInstance item = entry.Value;
+                    if (item == null || item.Entity == null || item.Entity.type != EItemType.Charm ||
+                        item.Charm == null || item.Charm.maxLevel <= 0)
+                    {
+                        continue;
+                    }
+
+                    int.TryParse(DungeonManager.Instance.GetGlobalItemStatValue(item.InstanceID, "Enchant"), out int level);
+                    if (level >= item.Charm.maxLevel) continue;
+                    if (GUILayout.Button(item.Entity.Name + "  +1", primaryButton, GUILayout.Height(34f)))
+                    {
+                        CatchUpRewards.ClaimEnchant(entry.Key);
+                        break;
+                    }
+                }
+            }
+            GUILayout.Space(8f);
+            DrawValue(MenuText.Get("MiracleCredits"), CatchUpRewards.ClientMiracleCredits.ToString());
+            if (CatchUpRewards.ClientMiracleCredits > 0)
+            {
+                foreach (string miracleId in CatchUpRewards.ClientMiracleOptions.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    Miracle miracle = MiracleDatabase.FindMiracle(miracleId);
+                    if (miracle != null && GUILayout.Button(miracle.Name, primaryButton, GUILayout.Height(34f)))
+                    {
+                        CatchUpRewards.ClaimMiracle(miracleId);
+                        break;
+                    }
+                }
+            }
+            GUILayout.Space(8f);
+            DrawValue(MenuText.Get("CharmCredits"), CatchUpRewards.ClientCharmCredits.ToString());
+            if (CatchUpRewards.ClientCharmCredits > 0 &&
+                GUILayout.Button(MenuText.Get("CreateCharmReward"), primaryButton, GUILayout.Height(34f)))
+            {
+                CatchUpRewards.ClaimCharm();
+            }
+            GUILayout.Space(8f);
+            DrawValue(MenuText.Get("TabletCredits"), CatchUpRewards.ClientTabletCredits.ToString());
+            if (CatchUpRewards.ClientTabletCredits > 0 &&
+                GUILayout.Button(MenuText.Get("CreateTabletReward"), primaryButton, GUILayout.Height(34f)))
+            {
+                CatchUpRewards.ClaimTablet();
+            }
+            GUILayout.Space(8f);
+            DrawValue(MenuText.Get("BossCredits"), CatchUpRewards.ClientBossCredits.ToString());
+            if (CatchUpRewards.ClientBossCredits > 0)
+            {
+                if (GUILayout.Button(MenuText.Get("BossCharmReward"), primaryButton, GUILayout.Height(34f)))
+                    CatchUpRewards.ClaimBoss("SEPHIRITE_BOSS");
+                if (GUILayout.Button(MenuText.Get("BossTabletReward"), primaryButton, GUILayout.Height(34f)))
+                    CatchUpRewards.ClaimBoss("SEPHIRITE_TABLET");
+            }
+            GUILayout.Space(8f);
+            GUILayout.Label(string.Format(
+                MenuText.Get("ClaimHistory"),
+                CatchUpRewards.ClientWeaponClaimed,
+                CatchUpRewards.ClientEnchantClaimed,
+                CatchUpRewards.ClientMiracleClaimed,
+                CatchUpRewards.ClientTabletClaimed,
+                CatchUpRewards.ClientBossClaimed,
+                CatchUpRewards.ClientCharmClaimed), muted);
+            GUILayout.Space(8f);
+            GUILayout.Label(MenuText.Get("ClientMissingRewards"), muted);
+            EndSection();
+            if (GUILayout.Button(MenuText.Get("Close"), button, GUILayout.Height(38f))) Toggle();
+            GUILayout.EndScrollView();
+        }
+
+        private static void DrawTabs()
+        {
+            string[] labels = { "TabRules", "TabCompensation", "TabDiagnostics", "TabHistory" };
+            GUILayout.BeginHorizontal();
+            for (int i = 0; i < labels.Length; i++)
+            {
+                if (GUILayout.Button(MenuText.Get(labels[i]), selectedTab == i ? primaryButton : button, GUILayout.Height(32f)))
+                {
+                    selectedTab = i;
+                    scroll = Vector2.zero;
+                }
+            }
+            GUILayout.EndHorizontal();
+            DrawDivider();
+        }
+
+        private static void DrawHostRuleTabs()
+        {
+            string[] labels = { "HostMultiplayerTab", "HostScalingTab", "HostPlayersTab" };
+            GUILayout.BeginHorizontal();
+            for (int i = 0; i < labels.Length; i++)
+            {
+                if (GUILayout.Button(MenuText.Get(labels[i]), hostRulesTab == i ? primaryButton : button,
+                    GUILayout.Height(30f)))
+                {
+                    hostRulesTab = i;
+                    scroll = Vector2.zero;
+                }
+            }
+            GUILayout.EndHorizontal();
+            DrawDivider();
+        }
+
+        private static void CaptureShortcutInput()
+        {
+            if (capturingShortcut == 0 || Event.current == null || Event.current.type != EventType.KeyDown ||
+                Event.current.keyCode == KeyCode.None)
+            {
+                return;
+            }
+
+            KeyCode[] modifiers = new List<KeyCode>
+            {
+                Event.current.control ? KeyCode.LeftControl : KeyCode.None,
+                Event.current.shift ? KeyCode.LeftShift : KeyCode.None,
+                Event.current.alt ? KeyCode.LeftAlt : KeyCode.None,
+                Event.current.command ? KeyCode.LeftCommand : KeyCode.None
+            }.Where(key => key != KeyCode.None).ToArray();
+            if (modifiers.Length == 0 &&
+                (Event.current.keyCode == KeyCode.LeftControl || Event.current.keyCode == KeyCode.RightControl ||
+                 Event.current.keyCode == KeyCode.LeftShift || Event.current.keyCode == KeyCode.RightShift ||
+                 Event.current.keyCode == KeyCode.LeftAlt || Event.current.keyCode == KeyCode.RightAlt ||
+                 Event.current.keyCode == KeyCode.LeftCommand || Event.current.keyCode == KeyCode.RightCommand))
+            {
+                return;
+            }
+
+            BepInEx.Configuration.KeyboardShortcut shortcut =
+                new BepInEx.Configuration.KeyboardShortcut(Event.current.keyCode, modifiers);
+            if (capturingShortcut == 1) Plugin.menuShortcut.Value = shortcut;
+            else Plugin.rescueShortcut.Value = shortcut;
+            Plugin.SaveSettings();
+            capturingShortcut = 0;
+            Event.current.Use();
+        }
+
+        private static void DrawClientPage()
+        {
+            CatchUpRewards.SendHello();
+            if (selectedTab == 1)
+            {
+                DrawClientCompensation();
+                return;
+            }
+            scroll = GUILayout.BeginScrollView(scroll);
+            GUILayout.Space(8f);
+            string heading = selectedTab == 0 ? MenuText.Get("TabRules")
+                : selectedTab == 2 ? MenuText.Get("TabDiagnostics") : MenuText.Get("TabHistory");
+            string content = selectedTab == 0 ? CatchUpRewards.ClientRules
+                : selectedTab == 2 ? CatchUpRewards.ClientDiagnostics : CatchUpRewards.ClientHistory;
+            BeginSection(heading);
+            GUILayout.Label(string.IsNullOrEmpty(content) ? MenuText.Get("NoData") : content, body);
+            if (selectedTab == 2)
+            {
+                DrawDownloadLinks();
+            }
+            EndSection();
+            GUILayout.EndScrollView();
+        }
+
+        private static void DrawHostPage()
+        {
+            scroll = GUILayout.BeginScrollView(scroll);
+            GUILayout.Space(8f);
+            if (selectedTab == 1)
+            {
+                BeginSection(MenuText.Get("TabCompensation"));
+                GUILayout.Label(MenuText.Get("HostCompensation"), body);
+                EndSection();
+                DrawPlayers();
+            }
+            else if (selectedTab == 2)
+            {
+                BeginSection(MenuText.Get("TabDiagnostics"));
+                GUILayout.Label(CatchUpRewards.BuildHostDiagnostics(null), body);
+                DrawDownloadLinks();
+                EndSection();
+            }
+            else
+            {
+                BeginSection(MenuText.Get("TabHistory"));
+                string history = CatchUpRewards.GetHostHistory();
+                GUILayout.Label(string.IsNullOrEmpty(history) ? MenuText.Get("NoData") : history, body);
+                EndSection();
+            }
+            GUILayout.EndScrollView();
+        }
+
+        private static void DrawDownloadLinks()
+        {
+            GUILayout.Space(10f);
+            GUILayout.Label(MenuText.Get("DownloadHelp"), muted);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(MenuText.Get("OpenReleasePage"), button, GUILayout.Height(32f)))
+                Application.OpenURL(CatchUpRewards.ReleasePageUrl);
+            if (GUILayout.Button(MenuText.Get("OpenPluginDownload"), primaryButton, GUILayout.Height(32f)))
+                Application.OpenURL(CatchUpRewards.PluginZipUrl);
+            GUILayout.EndHorizontal();
+        }
+
+        internal static void ResetClientCompensation()
+        {
+            CatchUpRewards.ClearClientState();
         }
 
         private static void DrawPlayers()
