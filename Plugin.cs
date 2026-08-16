@@ -14,7 +14,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.4.0";
+        public const string PluginVersion = "3.4.2";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> healthPerExtraPlayer;
@@ -32,6 +32,7 @@ namespace SephiriaTogether
         internal static ConfigEntry<KeyboardShortcut> menuShortcut;
         internal static ConfigEntry<KeyboardShortcut> rescueShortcut;
         internal static ConfigEntry<bool> autoReviveWhenClear;
+        internal static ConfigEntry<bool> bossLifesteal;
         private Harmony harmony;
 
         private void Awake()
@@ -58,6 +59,11 @@ namespace SephiriaTogether
                 "AutoReviveWhenClear",
                 false,
                 "Automatically revive all downed players at 50% HP after no living hostile enemies remain.");
+            bossLifesteal = Config.Bind(
+                "Scaling",
+                "BossLifesteal",
+                true,
+                "Allow Bosses and Minibosses to use the original hard-mode Blood Festival lifesteal after hitting players.");
             scalingStartsAbove = Config.Bind(
                 "Scaling",
                 "BaselinePlayers",
@@ -186,6 +192,7 @@ namespace SephiriaTogether
         private void OnGUI()
         {
             RescueAlerts.Draw();
+            VersionReminder.Draw();
             CoopMenu.Draw();
         }
 
@@ -196,6 +203,7 @@ namespace SephiriaTogether
                 CoopMenu.Toggle();
             }
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
+            VersionReminder.Update();
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)

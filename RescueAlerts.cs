@@ -11,15 +11,14 @@ namespace SephiriaTogether
     internal struct RescueAlertMessage : NetworkMessage
     {
         public string playerName;
-        public string floorGuid;
     }
 
     internal static class RescueAlerts
     {
         private static readonly Dictionary<int, double> LastRequests = new Dictionary<int, double>();
         private static readonly HashSet<uint> KnownDownPlayers = new HashSet<uint>();
+        private static readonly Dictionary<uint, float> DownFirstSeen = new Dictionary<uint, float>();
         private static string bannerPlayer = "";
-        private static string bannerFloor = "";
         private static float bannerUntil;
         private static bool urgent;
         private static GUIStyle bannerStyle;
@@ -37,6 +36,7 @@ namespace SephiriaTogether
             ConfigureSerialization();
             NetworkClient.RegisterHandler<RescueAlertMessage>(OnClientAlert, true);
             KnownDownPlayers.Clear();
+            DownFirstSeen.Clear();
         }
 
         internal static void Update()
@@ -46,7 +46,7 @@ namespace SephiriaTogether
                 CatchUpRewards.HostSupportsProtocol())
             {
                 NetworkClient.Send(new RescueRequestMessage());
-                Show(local.Name, local.currentFloorGuid, true);
+                Show(local.Name, true);
             }
 
             if (PlayerSpawner.MultiplayerList == null) return;
@@ -56,22 +56,37 @@ namespace SephiriaTogether
                 PlayerAvatar player = spawner != null ? spawner.PlayerAvatar : null;
                 if (player == null || player == local || !player.IsDead) continue;
                 current.Add(player.netId);
-                if (KnownDownPlayers.Add(player.netId)) Show(player.Name, player.currentFloorGuid, false);
+                if (!DownFirstSeen.TryGetValue(player.netId, out float firstSeen))
+                {
+                    DownFirstSeen[player.netId] = Time.unscaledTime;
+                    Plugin.LogInfo($"Rescue state first seen dead: {Describe(player)}");
+                    continue;
+                }
+                if (Time.unscaledTime - firstSeen >= 3f && KnownDownPlayers.Add(player.netId))
+                {
+                    Plugin.LogInfo($"Rescue state confirmed dead after grace period: {Describe(player)}");
+                    Show(player.Name, false);
+                }
             }
-            KnownDownPlayers.RemoveWhere(netId => !current.Contains(netId));
+            foreach (uint netId in DownFirstSeen.Keys.Where(netId => !current.Contains(netId)).ToArray())
+            {
+                if (KnownDownPlayers.Contains(netId)) Plugin.LogInfo($"Rescue state cleared: netId={netId}");
+                DownFirstSeen.Remove(netId);
+                KnownDownPlayers.Remove(netId);
+            }
         }
 
         internal static void Draw()
         {
             PlayerAvatar local = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
             PlayerAvatar down = PlayerSpawner.MultiplayerList?
-                .Where(spawner => spawner?.PlayerAvatar != null && spawner.PlayerAvatar != local && spawner.PlayerAvatar.IsDead)
+                .Where(spawner => spawner?.PlayerAvatar != null && spawner.PlayerAvatar != local &&
+                    spawner.PlayerAvatar.IsDead && KnownDownPlayers.Contains(spawner.PlayerAvatar.netId))
                 .Select(spawner => spawner.PlayerAvatar)
                 .FirstOrDefault();
             if (down != null && Time.unscaledTime >= bannerUntil)
             {
                 bannerPlayer = down.Name;
-                bannerFloor = down.currentFloorGuid;
                 urgent = false;
             }
             if (down == null && Time.unscaledTime >= bannerUntil) return;
@@ -80,14 +95,14 @@ namespace SephiriaTogether
             float pulse = urgent ? 0.72f + Mathf.PingPong(Time.unscaledTime * 1.8f, 0.28f) : 0.9f;
             GUI.color = new Color(1f, pulse, pulse, 1f);
             Rect area = new Rect(Mathf.Max(12f, Screen.width * 0.5f - 310f), 32f, Mathf.Min(620f, Screen.width - 24f), 92f);
-            string floor = string.IsNullOrEmpty(bannerFloor) ? "" : "\n" + MenuText.Get("RescueFloor") + " " + bannerFloor;
-            GUI.Box(area, string.Format(urgent ? MenuText.Get("RescueRequested") : MenuText.Get("PlayerDown"), bannerPlayer) + floor, bannerStyle);
+            GUI.Box(area, string.Format(urgent ? MenuText.Get("RescueRequested") : MenuText.Get("PlayerDown"), bannerPlayer), bannerStyle);
             GUI.color = Color.white;
         }
 
         internal static void ClearClient()
         {
             KnownDownPlayers.Clear();
+            DownFirstSeen.Clear();
             bannerPlayer = "";
             bannerUntil = 0f;
             urgent = false;
@@ -98,14 +113,22 @@ namespace SephiriaTogether
         private static void OnServerRequest(NetworkConnectionToClient connection, RescueRequestMessage message)
         {
             PlayerAvatar player = connection?.identity != null ? connection.identity.GetComponent<PlayerAvatar>() : null;
-            if (player == null || !player.IsDead || !CatchUpRewards.IsModdedConnection(connection)) return;
+            if (player == null || !player.IsDead || !CatchUpRewards.IsModdedConnection(connection))
+            {
+                Plugin.LogInfo($"Rescue request rejected: conn={connection?.connectionId ?? -1}, player={Describe(player)}, modded={CatchUpRewards.IsModdedConnection(connection)}");
+                return;
+            }
             double now = NetworkTime.time;
-            if (LastRequests.TryGetValue(connection.connectionId, out double last) && now - last < 10d) return;
+            if (LastRequests.TryGetValue(connection.connectionId, out double last) && now - last < 10d)
+            {
+                Plugin.LogInfo($"Rescue request rate-limited: conn={connection.connectionId}");
+                return;
+            }
             LastRequests[connection.connectionId] = now;
+            Plugin.LogInfo($"Rescue request accepted: conn={connection.connectionId}, {Describe(player)}");
             RescueAlertMessage alert = new RescueAlertMessage
             {
-                playerName = SafePlayerName(player.Name),
-                floorGuid = player.currentFloorGuid ?? ""
+                playerName = SafePlayerName(player.Name)
             };
             foreach (NetworkConnectionToClient target in NetworkServer.connections.Values)
             {
@@ -115,15 +138,14 @@ namespace SephiriaTogether
 
         private static void OnClientAlert(RescueAlertMessage message)
         {
-            Show(message.playerName, message.floorGuid, true);
+            Show(message.playerName, true);
             if (GameLogWriter.Instance != null)
                 GameLogWriter.Instance.WriteLog(string.Format(MenuText.Get("RescueRequested"), message.playerName), Color.red);
         }
 
-        private static void Show(string playerName, string floorGuid, bool isUrgent)
+        private static void Show(string playerName, bool isUrgent)
         {
             bannerPlayer = string.IsNullOrEmpty(playerName) ? MenuText.Get("UnknownPlayer") : playerName;
-            bannerFloor = floorGuid ?? "";
             urgent = isUrgent;
             bannerUntil = Time.unscaledTime + (isUrgent ? 12f : 7f);
         }
@@ -135,12 +157,10 @@ namespace SephiriaTogether
             Writer<RescueAlertMessage>.write = (writer, value) =>
             {
                 writer.WriteString(value.playerName);
-                writer.WriteString(value.floorGuid);
             };
             Reader<RescueAlertMessage>.read = reader => new RescueAlertMessage
             {
-                playerName = reader.ReadString(),
-                floorGuid = reader.ReadString()
+                playerName = reader.ReadString()
             };
         }
 
@@ -168,5 +188,14 @@ namespace SephiriaTogether
             string safe = value.Replace("<", "").Replace(">", "").Replace("\r", " ").Replace("\n", " ").Trim();
             return safe.Length > 24 ? safe.Substring(0, 24) : safe;
         }
+
+        private static string Describe(PlayerAvatar player) => player == null
+            ? "null"
+            : $"name={SafePlayerName(player.Name)}, netId={player.netId}, dead={player.IsDead}, hp={player.hp:0.##}, " +
+              $"floor={Short(player.currentFloorGuid)}, pos={player.transform.position}, inDungeon={player.isInDungeon}";
+
+        private static string Short(string value) => string.IsNullOrEmpty(value)
+            ? "-"
+            : value.Substring(0, Math.Min(8, value.Length));
     }
 }

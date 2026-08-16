@@ -54,7 +54,9 @@ Fresh mid-run players are caught up to the same-floor party median for money, cu
 
 Disconnected players receive the same route-difference catch-up if they rejoin after the party has advanced. Immediate rejoins with no missed floors receive nothing, and Dimension Pocket items are never granted again on rejoin.
 
-Weapon-upgrade, enchant, Charm, Miracle, Stone Tablet, and boss reward entitlements are stored by the host in the current run under a hashed player identity. Pending choices survive disconnects and game restarts, counted route floors cannot generate the same entitlement twice, and every successful claim is deducted and saved immediately. The client F8 panel shows host confirmation and the number of choices already claimed this run. Miracle catch-up offers a stable host-generated set of three choices. Charm, Tablet, and boss claims create vanilla owner-authority Sephirite rewards, so their final item selection still uses the game's normal server validation.
+Weapon-upgrade, enchant, Charm, Miracle, Stone Tablet, Tablet Fusion, and boss reward entitlements are stored by the host in the current run under a hashed player identity. Pending choices survive disconnects and game restarts, counted route floors cannot generate the same entitlement twice, and every successful claim is deducted and saved immediately. The client F8 panel shows host confirmation and the number of choices already claimed this run. Miracle catch-up offers a stable host-generated set of three choices. Charm, Tablet, and boss claims create vanilla owner-authority Sephirite rewards, so their final item selection still uses the game's normal server validation.
+
+Selectable catch-up is delivered through vanilla network objects placed near the player: Anvil, Enchant altar, Miracle selector, Charm Sephirite, Tablet Sephirite, Tablet Combiner, and boss reward choices. The menu is status-only and does not choose or generate rewards. Catch-up objects are visible only to their target player, and unmodded clients can use these original objects and interfaces; the host consumes an entitlement only after the vanilla completion command succeeds. Tablet Combiner compensation remains player-owned, preserves the normal money cost and tablet validation, and is consumed only after a successful fusion.
 
 The base game does not save the exact unclaimed Miracle, Tablet, or boss candidate payload after a floor is unloaded. Historical catch-up therefore creates a deterministic equivalent offer; it does not claim to restore the exact candidates that were visible on the missed floor.
 
@@ -113,7 +115,7 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
-.\scripts\package.ps1 -Version 3.4.0
+.\scripts\package.ps1 -Version 3.4.2
 ```
 
 This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.

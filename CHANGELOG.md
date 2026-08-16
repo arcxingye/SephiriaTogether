@@ -1,7 +1,24 @@
 # Changelog
 
-## 3.4.0
+## 3.4.2
 
+- Add a host toggle for original or disabled Boss and Miniboss Blood Festival lifesteal from player hits.
+- Track unclaimed Anvil floors per player and replace unrestricted F8 weapon choices with player-locked vanilla catch-up Anvils that preserve normal candidate rolls and dice rerolls.
+- Show a prominent version-mismatch banner before protocol handshake and link outdated clients directly to the latest plugin ZIP.
+- Automatically spawn vanilla Anvil, Enchant altar, Miracle selector, Charm, Stone Tablet, and boss reward objects for selectable catch-up; F8 is status-only and unmodded clients can use the original interfaces.
+- Replace raw floor GUIDs in player and rescue UI with route progress and readable room types.
+- Move fresh joiners and rejoining players into an active boss arena after floor travel completes, preventing closed boss gates from leaving them outside the fight.
+- Preserve unclaimed Anvil compensation when a player disconnects directly from the Anvil floor.
+- Upload the fresh joiner's actual Dimension Pocket selection to the host before granting it, and prevent stale downed state from carrying into a fresh mid-run character.
+- Count only completed floors before the host's current floor as missed rewards, preventing current or future Stone Tablet rewards from being granted early.
+- Track unclaimed Anvil floors from the vanilla reward spawner itself so opening and cancelling the Anvil UI still grants compensation after leaving.
+- Persist unclaimed Enchant, Miracle, Charm, and Stone Tablet floors; opening and cancelling their vanilla UI no longer loses compensation after travel or disconnect.
+- Stop recording or spawning Anvil compensation after the current weapon has no further vanilla enhancements, and clear accumulated weapon credits at max enhancement.
+- Let a host who continued directly into a saved dungeon create a new vanilla Steam lobby for the current run without returning to the multiplayer staging area.
+- Compensate missed Tablet Combiner opportunities with player-owned vanilla fusion objects, preserving normal tablet validation and money cost and consuming credit only after successful fusion.
+- Restrict catch-up Anvil, Enchant altar, Miracle selector, and Tablet Combiner visibility to their target player instead of showing them to the whole party.
+
+## 3.4.0
 - Add host-side fresh-join catch-up for median money, dice, max dice, missed inventory expansions, and the joining player's Dimension Pocket items.
 - Apply route-difference catch-up when a disconnected player rejoins after the party has advanced, without granting Dimension Pocket items again.
 - Add a client F8 compensation panel for host-validated missed weapon-upgrade and enchant choices when both sides run the mod.

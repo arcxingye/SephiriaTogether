@@ -163,6 +163,13 @@ namespace SephiriaTogether
             if (hostRulesTab == 0)
             {
             BeginSection(MenuText.Get("Multiplayer"));
+            if (JoinProgressBypass.CanCreateLobbyForCurrentRun())
+            {
+                GUILayout.Label(MenuText.Get("ResumeLobbyHelp"), muted);
+                if (GUILayout.Button(MenuText.Get("ResumeLobby"), primaryButton, GUILayout.Height(38f)))
+                    JoinProgressBypass.OpenLobbyCreationForCurrentRun();
+                GUILayout.Space(8f);
+            }
             GUILayout.Label(MenuText.Get("PlayerLimit"), body);
             GUILayout.BeginHorizontal();
             playerLimitText = GUILayout.TextField(playerLimitText ?? PlayerLimit.CurrentLimit.ToString(), 3, input, GUILayout.Height(34f));
@@ -196,6 +203,9 @@ namespace SephiriaTogether
             GUILayout.Label(MenuText.Get("VanillaScaling"), section);
             GUILayout.Label(CatchUpRewards.BuildOriginalScalingSummary(), body);
             GUILayout.Space(6f);
+            DrawToggle(MenuText.Get("BossLifesteal"), Plugin.bossLifesteal);
+            GUILayout.Label(MenuText.Get("BossLifestealHelp"), muted);
+            GUILayout.Space(8f);
             int currentPreset = GetPreset();
             DrawValue(MenuText.Get("CurrentPreset"), GetPresetName(currentPreset), 150f);
             GUILayout.BeginHorizontal();
@@ -308,84 +318,27 @@ namespace SephiriaTogether
             DrawValue(MenuText.Get("WeaponCredits"), CatchUpRewards.ClientWeaponCredits.ToString());
             if (CatchUpRewards.ClientWeaponCredits > 0)
             {
-                WeaponControllerSimple controller = player.GetComponent<WeaponControllerSimple>();
-                WeaponSimple weapon = controller != null ? controller.currentWeapon : null;
-                List<EnhancementMetadata> choices = weapon != null
-                    ? WeaponDatabase.GetWeaponEnhancements(weapon.entityId)
-                    : null;
-                if (choices != null)
-                {
-                    foreach (EnhancementMetadata choice in choices)
-                    {
-                        if (choice == null || !choice.enabled || choice.enhanced == null) continue;
-                        if (GUILayout.Button(choice.enhanced.Name, primaryButton, GUILayout.Height(34f)))
-                        {
-                            CatchUpRewards.ClaimWeapon(choice.enhanced.id);
-                            break;
-                        }
-                    }
-                }
+                GUILayout.Label(MenuText.Get("WeaponAnvilHelp"), muted);
             }
 
             GUILayout.Space(8f);
             DrawValue(MenuText.Get("EnchantCredits"), CatchUpRewards.ClientEnchantCredits.ToString());
-            if (CatchUpRewards.ClientEnchantCredits > 0 && player.Inventory != null)
-            {
-                foreach (KeyValuePair<ItemPosition, NewItemOwnInstance> entry in player.Inventory.inventoryMatrix)
-                {
-                    NewItemOwnInstance item = entry.Value;
-                    if (item == null || item.Entity == null || item.Entity.type != EItemType.Charm ||
-                        item.Charm == null || item.Charm.maxLevel <= 0)
-                    {
-                        continue;
-                    }
-
-                    int.TryParse(DungeonManager.Instance.GetGlobalItemStatValue(item.InstanceID, "Enchant"), out int level);
-                    if (level >= item.Charm.maxLevel) continue;
-                    if (GUILayout.Button(item.Entity.Name + "  +1", primaryButton, GUILayout.Height(34f)))
-                    {
-                        CatchUpRewards.ClaimEnchant(entry.Key);
-                        break;
-                    }
-                }
-            }
+            if (CatchUpRewards.ClientEnchantCredits > 0) GUILayout.Label(MenuText.Get("EnchantObjectHelp"), muted);
             GUILayout.Space(8f);
             DrawValue(MenuText.Get("MiracleCredits"), CatchUpRewards.ClientMiracleCredits.ToString());
-            if (CatchUpRewards.ClientMiracleCredits > 0)
-            {
-                foreach (string miracleId in CatchUpRewards.ClientMiracleOptions.Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries))
-                {
-                    Miracle miracle = MiracleDatabase.FindMiracle(miracleId);
-                    if (miracle != null && GUILayout.Button(miracle.Name, primaryButton, GUILayout.Height(34f)))
-                    {
-                        CatchUpRewards.ClaimMiracle(miracleId);
-                        break;
-                    }
-                }
-            }
+            if (CatchUpRewards.ClientMiracleCredits > 0) GUILayout.Label(MenuText.Get("MiracleObjectHelp"), muted);
             GUILayout.Space(8f);
             DrawValue(MenuText.Get("CharmCredits"), CatchUpRewards.ClientCharmCredits.ToString());
-            if (CatchUpRewards.ClientCharmCredits > 0 &&
-                GUILayout.Button(MenuText.Get("CreateCharmReward"), primaryButton, GUILayout.Height(34f)))
-            {
-                CatchUpRewards.ClaimCharm();
-            }
+            if (CatchUpRewards.ClientCharmCredits > 0) GUILayout.Label(MenuText.Get("SephiriteObjectHelp"), muted);
             GUILayout.Space(8f);
             DrawValue(MenuText.Get("TabletCredits"), CatchUpRewards.ClientTabletCredits.ToString());
-            if (CatchUpRewards.ClientTabletCredits > 0 &&
-                GUILayout.Button(MenuText.Get("CreateTabletReward"), primaryButton, GUILayout.Height(34f)))
-            {
-                CatchUpRewards.ClaimTablet();
-            }
+            if (CatchUpRewards.ClientTabletCredits > 0) GUILayout.Label(MenuText.Get("SephiriteObjectHelp"), muted);
+            GUILayout.Space(8f);
+            DrawValue(MenuText.Get("FusionCredits"), CatchUpRewards.ClientFusionCredits.ToString());
+            if (CatchUpRewards.ClientFusionCredits > 0) GUILayout.Label(MenuText.Get("FusionObjectHelp"), muted);
             GUILayout.Space(8f);
             DrawValue(MenuText.Get("BossCredits"), CatchUpRewards.ClientBossCredits.ToString());
-            if (CatchUpRewards.ClientBossCredits > 0)
-            {
-                if (GUILayout.Button(MenuText.Get("BossCharmReward"), primaryButton, GUILayout.Height(34f)))
-                    CatchUpRewards.ClaimBoss("SEPHIRITE_BOSS");
-                if (GUILayout.Button(MenuText.Get("BossTabletReward"), primaryButton, GUILayout.Height(34f)))
-                    CatchUpRewards.ClaimBoss("SEPHIRITE_TABLET");
-            }
+            if (CatchUpRewards.ClientBossCredits > 0) GUILayout.Label(MenuText.Get("BossObjectHelp"), muted);
             GUILayout.Space(8f);
             GUILayout.Label(string.Format(
                 MenuText.Get("ClaimHistory"),
@@ -394,7 +347,8 @@ namespace SephiriaTogether
                 CatchUpRewards.ClientMiracleClaimed,
                 CatchUpRewards.ClientTabletClaimed,
                 CatchUpRewards.ClientBossClaimed,
-                CatchUpRewards.ClientCharmClaimed), muted);
+                CatchUpRewards.ClientCharmClaimed,
+                CatchUpRewards.ClientFusionClaimed), muted);
             GUILayout.Space(8f);
             GUILayout.Label(MenuText.Get("ClientMissingRewards"), muted);
             EndSection();
@@ -557,7 +511,7 @@ namespace SephiriaTogether
                 GUILayout.EndHorizontal();
                 string details = MenuText.Get("Level") + " " + (level != null ? level.currentLevel : 0) +
                                  "     HP " + player.PlayerAvatar.hp.ToString("0") + " / " + player.PlayerAvatar.MaxHp.ToString("0") +
-                                 "     " + MenuText.Get("Floor") + " " + (string.IsNullOrEmpty(player.PlayerAvatar.currentFloorGuid) ? "-" : player.PlayerAvatar.currentFloorGuid);
+                                  "     " + MenuText.Get("Floor") + " " + FloorDisplay.Format(player.PlayerAvatar.currentFloorGuid);
                 GUILayout.Label(details, muted);
                 if (!player.isHost && player.connectionToClient != null)
                 {

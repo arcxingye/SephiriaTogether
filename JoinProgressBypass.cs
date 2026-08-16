@@ -2,12 +2,47 @@ using System;
 using System.Reflection;
 using HarmonyLib;
 using HeathenEngineering.SteamworksIntegration;
+using HeathenEngineering.SteamworksIntegration.API;
+using Mirror;
 using UnityEngine;
 
 namespace SephiriaTogether
 {
     internal static class JoinProgressBypass
     {
+        private static readonly FieldInfo MoveMultiZoneField =
+            AccessTools.Field(typeof(UI_MultiplayerPanel), "moveMultiZone");
+
+        internal static bool CanCreateLobbyForCurrentRun()
+        {
+            if (!NetworkServer.active || DungeonManager.Instance == null || !DungeonManager.Instance.isRunStarted)
+                return false;
+            GameObject steamManager = SingletonObject.Find("SteamManager");
+            return steamManager != null && App.Initialized &&
+                   steamManager.TryGetComponent(out LobbyManager manager) && !manager.HasLobby;
+        }
+
+        internal static void OpenLobbyCreationForCurrentRun()
+        {
+            if (!CanCreateLobbyForCurrentRun()) return;
+            HorayNetworkAuthenticator.allowConnection = true;
+            UI_MultiplayerPanel panel = UIManager.Instance?.GetElement<UI_MultiplayerPanel>();
+            if (panel == null)
+            {
+                Plugin.LogInfo("Unable to open the vanilla multiplayer panel for the current run.");
+                return;
+            }
+            CoopMenu.Close();
+            panel.Open();
+            panel.OnCreateButton();
+            Plugin.LogInfo("Opened vanilla lobby creation for the resumed dungeon run.");
+        }
+
+        internal static void KeepCurrentFloorWhenCreatingLobby(UI_MultiplayerPanel panel)
+        {
+            if (panel == null || DungeonManager.Instance == null || !DungeonManager.Instance.isRunStarted) return;
+            MoveMultiZoneField?.SetValue(panel, false);
+        }
     }
 
     [HarmonyPatch(typeof(UI_MultiplayerPanel), "OnJoinButton", new[] { typeof(LobbyData) })]
@@ -50,8 +85,16 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(UI_MultiplayerPanel), "HandleCreated")]
     internal static class SteamLobbyCreatedProgressPatch
     {
+        private static void Prefix(UI_MultiplayerPanel __instance)
+        {
+            JoinProgressBypass.KeepCurrentFloorWhenCreatingLobby(__instance);
+        }
+
         private static void Postfix(LobbyData data)
         {
+            data["pw"] = "open";
+            data["SephiriaTogether"] = Plugin.PluginVersion;
+            HorayNetworkAuthenticator.allowConnection = true;
             if (Plugin.allowLowerProgressPlayers.Value)
             {
                 data["Chapter"] = "0";
