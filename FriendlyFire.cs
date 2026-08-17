@@ -35,24 +35,7 @@ namespace SephiriaTogether
 
         private static void Postfix(UnitAvatar __instance, DamageInstance damage, EApplyDamageResult __result, State __state)
         {
-            if (__state != null && __state.Friendly)
-            {
-                Plugin.LogInfo(
-                    $"Friendly fire result={__result}, damage={damage.damage:0.##}, " +
-                    $"applied={damage.damageResult}, target={__instance.name}, " +
-                    $"sameLeader={__instance.NetworkLeader == damage.origin}, " +
-                    $"targetFaction={__instance.faction}, attackerFaction={(damage.origin as UnitAvatar)?.faction}, " +
-                    $"layers={damage.targetFactionLayers}, peace={CombatManager.Instance?.PeaceMode}, " +
-                    $"dead={__instance.IsDead}, invulnerable={__instance.IsInvulnerable}, " +
-                    $"lifeInvulnerable={GetLifeInvulnerable(__instance)}, " +
-                    $"pitfall={__instance.TopdownRigidbody != null && __instance.TopdownRigidbody.IsPitFalling}.");
-            }
             RestorePeaceMode(__state);
-        }
-
-        private static bool GetLifeInvulnerable(UnitAvatar avatar)
-        {
-            return (bool)(AccessTools.Field(typeof(UnitAvatar), "isLifeInvincibleApplied")?.GetValue(avatar) ?? false);
         }
 
         private static System.Exception Finalizer(System.Exception __exception, State __state)
@@ -78,7 +61,6 @@ namespace SephiriaTogether
             if (Plugin.friendlyFire.Value && target is PlayerAvatar victim &&
                 damage?.origin is PlayerAvatar attacker && attacker != victim)
             {
-                Plugin.LogInfo("FriendlyFireRelationPatch skipped player relation denial.");
                 damage.failed = EDamageFailType.None;
                 return false;
             }

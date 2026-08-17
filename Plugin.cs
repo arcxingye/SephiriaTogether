@@ -6,6 +6,7 @@ using HarmonyLib;
 using Mirror;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 
 namespace SephiriaTogether
 {
@@ -14,7 +15,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.5.0";
+        public const string PluginVersion = "3.5.1";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> healthPerExtraPlayer;
@@ -43,6 +44,7 @@ namespace SephiriaTogether
         internal static ConfigEntry<bool> autoReviveWhenClear;
         internal static ConfigEntry<bool> bossLifesteal;
         private Harmony harmony;
+        private int lastShortcutFrame = -1;
 
         private void Awake()
         {
@@ -257,22 +259,58 @@ namespace SephiriaTogether
 
         private void OnGUI()
         {
+            HandleGuiShortcuts();
             RescueAlerts.Draw();
             VersionReminder.Draw();
             AutoPilot.Draw();
             CoopMenu.Draw();
         }
 
+        private void HandleGuiShortcuts()
+        {
+            Event current = Event.current;
+            if (current == null || current.type != EventType.KeyDown || lastShortcutFrame == Time.frameCount)
+                return;
+            if (current.keyCode != KeyCode.F8 && current.keyCode != KeyCode.F9) return;
+            lastShortcutFrame = Time.frameCount;
+            if (current.keyCode == KeyCode.F8)
+            {
+                LogInfo($"GUI shortcut pressed: menu, open={CoopMenu.IsOpen}.");
+                CoopMenu.Toggle();
+                current.Use();
+                return;
+            }
+            if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen)
+            {
+                LogInfo("GUI shortcut pressed: autoplay.");
+                AutoPilot.Toggle();
+                current.Use();
+            }
+        }
+
         private void Update()
         {
-            if (!CoopMenu.IsCapturingShortcut && menuShortcut.Value.IsDown())
+            bool menuPressed = menuShortcut.Value.IsDown() ||
+                               WasFallbackFunctionKeyPressed(KeyCode.F8, Keyboard.current?.f8Key);
+            bool autoPilotPressed = autoPilotShortcut.Value.IsDown() ||
+                                    WasFallbackFunctionKeyPressed(KeyCode.F9, Keyboard.current?.f9Key);
+            if (!CoopMenu.IsCapturingShortcut && menuPressed)
             {
+                LogInfo($"Shortcut pressed: menu={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
                 CoopMenu.Toggle();
             }
-            if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen && autoPilotShortcut.Value.IsDown())
+            if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen && autoPilotPressed)
+            {
+                LogInfo($"Shortcut pressed: autoplay={autoPilotShortcut.Value}.");
                 AutoPilot.Toggle();
+            }
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
+        }
+
+        private static bool WasFallbackFunctionKeyPressed(KeyCode legacyKey, KeyControl inputKey)
+        {
+            return Input.GetKeyDown(legacyKey) || inputKey != null && inputKey.wasPressedThisFrame;
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)

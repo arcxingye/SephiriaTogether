@@ -262,33 +262,6 @@ namespace SephiriaTogether
             }
         }
 
-        internal static void ScheduleExperienceCatchUp(PlayerSpawner player)
-        {
-            if (NetworkServer.active && player != null && Plugin.InstanceForPatches != null)
-                Plugin.InstanceForPatches.StartCoroutine(CatchUpExperienceAfterTravel(player));
-        }
-
-        private static IEnumerator CatchUpExperienceAfterTravel(PlayerSpawner player)
-        {
-            yield return new WaitForSeconds(1f);
-            if (!NetworkServer.active || player?.PlayerAvatar == null || player.isHost) yield break;
-            LevelController level = player.GetComponent<LevelController>();
-            if (level == null) yield break;
-            List<int> peerExperience = PlayerSpawner.MultiplayerList
-                .Where(peer => peer != null && peer != player && peer.PlayerAvatar != null &&
-                    peer.PlayerAvatar.currentFloorGuid == player.PlayerAvatar.currentFloorGuid)
-                .Select(peer => peer.GetComponent<LevelController>())
-                .Where(peerLevel => peerLevel != null)
-                .Select(peerLevel => Math.Max(0, peerLevel.currentExp))
-                .ToList();
-            if (peerExperience.Count == 0) yield break;
-            int target = Mathf.FloorToInt(Median(peerExperience) * Plugin.catchUpExperienceRatio.Value);
-            int amount = Math.Max(0, target - level.currentExp);
-            Log?.LogInfo($"Floor EXP catch-up check: player={Describe(player)}, currentExp={level.currentExp}, " +
-                         $"peerExp=[{string.Join(",", peerExperience)}], target={target}, grant={amount}.");
-            if (amount > 0) level.AddExp(amount);
-        }
-
         private static IEnumerator CatchUpAfterTravel(PlayerSpawner spawner, bool isFresh, bool isRejoin)
         {
             Log?.LogInfo($"Catch-up travel wait started: fresh={isFresh}, rejoin={isRejoin}, player={Describe(spawner)}.");
@@ -367,7 +340,7 @@ namespace SephiriaTogether
                 peerMaxDice.Add(Math.Max(0, peer.PlayerAvatar.maxRerollDice));
             }
 
-            if (peerExperience.Count > 0)
+            if (isFresh && peerExperience.Count > 0)
             {
                 int target = Mathf.FloorToInt(Median(peerExperience) * Plugin.catchUpExperienceRatio.Value);
                 int amount = Math.Max(0, target - newcomer.currentExp);
@@ -660,6 +633,19 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(HorayNetworkManager), nameof(HorayNetworkManager.OnServerDisconnect))]
     internal static class MidRunDisconnectCleanupPatch
     {
+        private static void Prefix(NetworkConnectionToClient conn)
+        {
+            int creatures = CombatManager.Instance?.AllCreatures?.Count ?? 0;
+            PlayerSpawner player = conn?.identity != null ? conn.identity.GetComponent<PlayerSpawner>() : null;
+            string address = conn != null && NetworkManager.singleton?.transport != null
+                ? NetworkManager.singleton.transport.ServerGetClientAddress(conn.connectionId)
+                : "-";
+            Plugin.LogInfo($"Server disconnect observed: conn={conn?.connectionId ?? -1}, " +
+                            $"player={player?.PlayerAvatar?.Name ?? "-"}, address={address}, " +
+                            $"ready={conn?.isReady ?? false}, players={PlayerSpawner.MultiplayerList?.Count ?? 0}, " +
+                           $"connections={NetworkServer.connections.Count}, creatures={creatures}.");
+        }
+
         private static void Postfix(NetworkConnectionToClient conn)
         {
             MidRunJoin.RemoveConnection(conn);
@@ -681,6 +667,46 @@ namespace SephiriaTogether
         private static void Postfix(PlayerSpawner __instance)
         {
             MidRunJoin.ScheduleCatchUp(__instance);
+        }
+    }
+
+    [HarmonyPatch(typeof(UnitAvatar), nameof(UnitAvatar.OnStartClient))]
+    internal static class LateJoinedDeadUnitStatePatch
+    {
+        private static void Postfix(UnitAvatar __instance)
+        {
+            if (__instance == null || __instance is PlayerAvatar || !__instance.IsDead) return;
+            ApplyDeadState(__instance);
+            if (Plugin.InstanceForPatches != null)
+                Plugin.InstanceForPatches.StartCoroutine(ApplyAfterStart(__instance));
+        }
+
+        private static IEnumerator ApplyAfterStart(UnitAvatar unit)
+        {
+            yield return null;
+            if (unit != null && unit.IsDead) ApplyDeadState(unit);
+        }
+
+        private static void ApplyDeadState(UnitAvatar unit)
+        {
+            Traverse.Create(unit).Method("ApplyCorpseVisual").GetValue();
+            unit.HPBar?.Hide(forced: true);
+        }
+    }
+
+    [HarmonyPatch(typeof(DropItemOnDie), nameof(DropItemOnDie.DropEXP))]
+    internal static class OrphanExperienceCleanupPatch
+    {
+        private static void Postfix()
+        {
+            if (!NetworkServer.active || Exp.managedExpInstances == null) return;
+            foreach (GameObject instance in Exp.managedExpInstances.ToArray())
+            {
+                if (instance == null || !instance.TryGetComponent(out Exp exp) || exp.target != null) continue;
+                NetworkServer.Destroy(instance);
+                Exp.managedExpInstances.Remove(instance);
+                Plugin.LogInfo("Removed orphan EXP created for a connection without an initialized player.");
+            }
         }
     }
 }

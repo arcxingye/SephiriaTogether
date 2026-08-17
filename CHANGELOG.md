@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.5.1
+
+- Extend AFK autopilot through Grassland quest-board BattleZones and automatically select the Boss node after the required quest events are cleared.
+- Fix repeated reward and inventory-arrangement work during quest completion, reducing frame stalls and post-battle freezes.
+- Improve Anvil detection for players joining another host, including runtime floor-event detection and client-side Anvil discovery.
+- Prevent quest floors from being treated as ordinary Charm compensation floors, avoiding repeated rewards after restarting an unfinished quest.
+
 ## 3.5.0
 
 - Add a conservative F9 AFK autopilot that follows the same-floor host, attacks nearby enemies, collects nearby drops, lets a host or solo player use explicit vanilla next-stage entrances after clearing, and never consumes a reward when no favorite choice is available.
@@ -41,6 +48,30 @@
 - Rewrite F8 text around player-visible behavior and game terminology, localize rules/diagnostics, use game item and hard-mode names where available, and remove obsolete menu strings.
 - Align Mole Chieftain windmill defense to its 1.65-second warning: attack during the early telegraph, then hold guard continuously through the damage window instead of using the normal guard pulse.
 - Register hostile circle and ellipse warnings, prioritize PathGrid escape, and dash late in the telegraph so non-blocking weapons evade Mole Chieftain phase-two rocks instead of standing still or using offensive right-click.
+- Synchronize local autoplay state between modded peers and prefix world/list display names without changing saved player names.
+- Use the game's normal run countdown during enemy-free autoplay navigation, and cancel running when combat, AOE evasion, or movement stops.
+- Treat grounded dynamite bullets as persistent blast hazards, dodge them before combat, widen shield projectile reaction distance, and extend normal guard pulses to improve sword-and-shield uptime.
+- Extend automatic defense to defensive katana forms and quarterstaff guard phases, while routing greatsword and non-defensive katana/staff forms to movement and dash evasion.
+- Adapt autoplay positioning and input to every runtime weapon form: charge and release bows, sustain automatic ranged weapons at safe distance, use per-weapon melee reach, and honor upgraded secondary modes and resource gates.
+- Stop ranged fire through PathGrid obstacles, route to a reachable clear firing position around the target, and abandon engagements that make no movement, distance, or damage progress instead of deadlocking across cover.
+- Invalidate cleared or active BossSpawner caches so exits can take over after victory, discover unparented current-grid exits, and scale ranged/Boss standoff with runtime ranged form and Weapon Range upgrades.
+- Restrict EXP catch-up to authenticated fresh mid-run players instead of every non-host floor traveler or reconnect, and reconstruct synced dead-enemy corpse/HP-bar state for late observers without replaying death rewards.
+- Require enemies to be reachable on the local PathGrid before entering combat, continue toward exits when teammates open the next room, and restore ranged greatsword transform/laser activation at standoff range without toggling it off again.
+- On mutual Tablet/Fusion floors, make autoplay always prioritize and claim the right-side Stone Tablet reward, even when ordinary reward auto-selection is disabled, leaving the fusion alternative unused.
+- Restore greatsword charged secondary actions by releasing sustained primary combos, waiting for the current swing to finish, then holding vanilla secondary through its charge window; log runtime transform and addon state for diagnosis.
+- Treat any populated greatsword transform replacement as the tier-2 ranged form, generalize special-action queuing across sustained combo weapons, preserve continuous vanilla attack-speed input, and emit periodic entity/fire-data/addon/attack-speed/input diagnostics.
+- Prioritize spawned F-interaction exits over stale client BossSpawner state, discover gathering exits across parent/child components, repeatedly use the vanilla interaction while players assemble, and abandon trigger zones that never recreate a boss.
+- Route to reachable cells around blocked FloorMover centers instead of their occupied origin, follow teammates through connected floors with the vanilla network MoveFloor request rather than a server-only call/world-map UI, and log peer floor state.
+- Detect the actual ranged greatsword laser (`Weapon_GreatswordLaser_*` BulletBurst attacks) as an uninterrupted held-primary weapon, preserving left-click while kiting and suppressing right-click, quick-slot, dash, and pseudo-defense interruptions.
+- Fix blocked-shot/retreat boolean precedence that still prevented the uninterrupted laser primary from ever pressing left-click, and keep it firing during evade movement even when conservative obstacle sight tests disagree.
+- Complete the two-stage post-Boss route by using FloorMover/DungeonStair to select a validated connected forward floor for clients, then prioritize the final all-player gathering interaction in the intermediate room instead of stopping at the world-map UI.
+- Drive post-Boss exit search from the vanilla `RpcByeEnd` completion event, immediately invalidating stale client BossSpawner/path caches and allowing confirmed Boss floors to advance despite a delayed `IsInBattle` flag.
+- Cover the independent SeedBossSpawner completion path and special post-Boss exits (`DungeonStairCustom`, floor portals, and multi-zone stage exits) in addition to standard BossSpawner stairs and gathering points.
+- Keep rejoining players moving toward a discovered FloorMover when their spawn lies in a disconnected/not-yet-updated PathGrid region, using direct entrance steering as a fallback instead of dropping to a stationary teammate follow state.
+- Restore vanilla party semantics at ordinary FloorMover stairs: wait for every living player within 10 meters with no battle/preparation state, let only the host select a route, and use delayed `MoveFloorViaWorldmap`/`MoveTogether` instead of moving one client alone.
+- Log server-side connection, player, and active-creature counts when a client disconnects so mass disconnects after rejoin or room transitions can be distinguished from combat deaths and spawn load.
+- Remove per-hit friendly-fire Info logging, which multiplied across players and multi-hit area attacks and could stall a large-room host when combined with damage-meter logging; retain behavior and concise disconnect identity diagnostics.
+- Keep ranged primary attacks active while retreating or evading hazards when line of fire remains clear, and resynchronize held input after vanilla cancels a weapon action so bows, crossbows, staves, golems, and special ranged basics can resume firing.
 - Cancel the vanilla revive channel on knockback, range loss, death, UI interruption, or autopilot shutdown, then retain a living rescue target for a clean re-approach and restart.
 
 ## 3.4.2

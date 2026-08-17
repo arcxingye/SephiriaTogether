@@ -122,9 +122,10 @@ namespace SephiriaTogether
         private static void DrawWindow(int id)
         {
             GUILayout.BeginVertical();
-            GUILayout.BeginHorizontal(GUILayout.Height(46f));
+            GUILayout.BeginHorizontal(GUILayout.Height(62f));
             GUILayout.BeginVertical();
             GUILayout.Label(MenuText.Get("Title"), title);
+            GUILayout.Label(MenuText.Get("Subtitle"), muted);
             GUILayout.Label(MenuText.Get("HostSettings"), muted);
             GUILayout.EndVertical();
             GUILayout.FlexibleSpace();
@@ -136,7 +137,7 @@ namespace SephiriaTogether
             {
                 DrawAutoPilotPage();
                 GUILayout.EndVertical();
-                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
+                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
                 return;
             }
             if (!NetworkServer.active)
@@ -303,7 +304,7 @@ namespace SephiriaTogether
             GUILayout.Space(8f);
             GUILayout.EndScrollView();
             GUILayout.EndVertical();
-            GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
+            GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
         }
 
         private static void DrawClientCompensation()

@@ -7,6 +7,7 @@ namespace SephiriaTogether
         private static readonly Dictionary<string, string[]> Text = new Dictionary<string, string[]>
         {
             ["Title"] = new[] { "Sephiria Together", "Sephiria Together", "Sephiria Together", "Sephiria Together", "Sephiria Together" },
+            ["Subtitle"] = new[] { "by arcxingye", "by arcxingye", "by arcxingye", "by arcxingye", "by arcxingye" },
             ["HostSettings"] = new[] { "联机与自动游玩", "連線與自動遊玩", "Multiplayer and autoplay", "멀티플레이 및 자동 플레이", "マルチプレイ・自動プレイ" },
             ["TabRules"] = new[] { "规则", "規則", "Rules", "규칙", "ルール" },
             ["TabAutoPilot"] = new[] { "自动游玩", "自動遊玩", "Autoplay", "자동 플레이", "自動プレイ" },
@@ -25,9 +26,10 @@ namespace SephiriaTogether
             ["PressNewRescueShortcut"] = new[] { "请按下新的请求救援快捷键。", "請按下新的請求救援快速鍵。", "Press the new rescue request shortcut.", "새 구조 요청 단축키를 누르세요.", "新しい救援要請ショートカットを押してください。" },
             ["AutoPilotShortcut"] = new[] { "自动游玩快捷键", "自動遊玩快速鍵", "Autoplay shortcut", "자동 플레이 단축키", "自動プレイキー" },
             ["AutoPilotLocalSettings"] = new[] { "自动游玩", "自動遊玩", "Autoplay", "자동 플레이", "自動プレイ" },
+            ["AutoPilotNamePrefix"] = new[] { "（自动游玩）", "（自動遊玩）", "(Autoplay) ", "(자동 플레이) ", "（自動プレイ）" },
             ["ChangeAutoPilotShortcut"] = new[] { "修改自动游玩快捷键", "修改自動遊玩快速鍵", "Change autoplay shortcut", "자동 플레이 단축키 변경", "自動プレイキー変更" },
             ["PressNewAutoPilotShortcut"] = new[] { "请按下新的自动游玩快捷键。", "請按下新的自動遊玩快速鍵。", "Press the new autoplay shortcut.", "새 자동 플레이 단축키를 누르세요.", "新しい自動プレイキーを押してください。" },
-            ["AutoPilotHelp"] = new[] { "开启后自动移动、战斗、拾取和前进，并优先救援可到达的队友。鼠标仍可操作菜单，按快捷键可随时关闭。", "開啟後自動移動、戰鬥、拾取和前進，並優先救援可到達的隊友。滑鼠仍可操作選單，按快速鍵可隨時關閉。", "Automatically move, fight, collect, and advance while prioritizing reachable teammates. The mouse still works in menus; press the shortcut to stop anytime.", "자동 이동, 전투, 수집과 진행을 하며 도달 가능한 팀원을 우선 구조합니다. 메뉴에서는 마우스를 사용할 수 있고 단축키로 언제든 끌 수 있습니다.", "移動、戦闘、回収、進行を自動化し、到達可能な仲間の救助を優先します。メニューではマウスを使用でき、キーでいつでも停止できます。" },
+            ["AutoPilotHelp"] = new[] { "开启后自动移动、战斗、拾取和前进，并按当前武器及其强化调整攻击方式和距离：远程保持距离持续射击，近战进入各自有效范围。优先救援可到达的队友，按快捷键可随时关闭。", "開啟後自動移動、戰鬥、拾取和前進，並依目前武器及其強化調整攻擊方式與距離：遠程保持距離持續射擊，近戰進入各自有效範圍。優先救援可到達的隊友，按快速鍵可隨時關閉。", "Automatically move, fight, collect, and advance, adapting range and input to the equipped weapon and its upgrades. Ranged weapons maintain distance and keep firing; melee weapons enter their effective reach. Reachable teammates are rescued first.", "자동 이동, 전투, 수집과 진행을 하며 현재 무기와 강화에 맞춰 공격 방식과 거리를 조정합니다. 원거리 무기는 거리를 유지하며 계속 사격하고, 근접 무기는 각자의 유효 사거리에 진입합니다. 도달 가능한 팀원을 우선 구조합니다.", "移動、戦闘、回収、進行を自動化し、現在の武器と強化に応じて攻撃方法と距離を調整します。遠距離武器は間合いを保って射撃し、近接武器は固有の有効範囲まで接近します。到達可能な仲間を優先して救助します。" },
             ["EnableAutoPilot"] = new[] { "开启自动游玩", "開啟自動遊玩", "Enable autoplay", "자동 플레이 켜기", "自動プレイを有効化" },
             ["DisableAutoPilot"] = new[] { "关闭自动游玩", "關閉自動遊玩", "Disable autoplay", "자동 플레이 끄기", "自動プレイを無効化" },
             ["AutoPilotEnabled"] = new[] { "自动游玩已开启。", "自動遊玩已開啟。", "Autoplay enabled.", "자동 플레이가 켜졌습니다.", "自動プレイを有効にしました。" },
@@ -36,7 +38,7 @@ namespace SephiriaTogether
             ["AutoArrangeInventory"] = new[] { "自动整理背包", "自動整理背包", "Auto-arrange inventory", "인벤토리 자동 정리", "インベントリ自動整理" },
             ["AutoArrangeInventoryHelp"] = new[] { "脱离战斗且背包稳定 2 秒后，自动调整物品和石板位置，优先提高生效神器的等级。", "脫離戰鬥且背包穩定 2 秒後，自動調整物品和石板位置，優先提高生效神器的等級。", "After two seconds out of combat with a stable inventory, rearrange items and Tablets to improve enabled Charm levels.", "전투가 끝나고 인벤토리가 2초 동안 안정되면 아이템과 석판을 정리해 활성 부적 레벨을 높입니다.", "戦闘外でインベントリが2秒安定すると、アイテムと石板を整理して有効な護符レベルを高めます。" },
             ["AutoDefend"] = new[] { "自动格挡与弹反", "自動格擋與彈反", "Automatic guard and parry", "자동 방어 및 패링", "自動ガード・パリィ" },
-            ["AutoDefendHelp"] = new[] { "使用剑盾时自动格挡，使用匕首时自动弹反；范围攻击优先走位，来不及时会冲刺离开。消耗与判定均遵循游戏规则。", "使用劍盾時自動格擋，使用匕首時自動彈反；範圍攻擊優先走位，來不及時會衝刺離開。消耗與判定均遵循遊戲規則。", "Automatically guard with sword-and-shield and parry with dagger. Area attacks are avoided by moving or dashing first. Costs and timing follow game rules.", "검방패는 자동 방어하고 단검은 자동 패링합니다. 범위 공격은 우선 이동하거나 대시로 피하며 소모와 판정은 게임 규칙을 따릅니다.", "剣盾では自動ガード、短剣では自動パリィします。範囲攻撃は移動またはダッシュで回避し、消費と判定はゲーム準拠です。" },
+            ["AutoDefendHelp"] = new[] { "剑盾、匕首、刀和长棍会使用各自的格挡、弹反或反击动作；巨剑没有防御型右键，会优先冲刺或走位。炸药、激光和范围攻击均优先躲避。", "劍盾、匕首、刀和長棍會使用各自的格擋、彈反或反擊動作；巨劍沒有防禦型右鍵，會優先衝刺或走位。炸藥、雷射和範圍攻擊均優先躲避。", "Sword-and-shield, dagger, katana, and staff use their guard, parry, or counter actions. Greatsword has no defensive secondary action and evades instead. Dynamite, lasers, and area attacks are always avoided first.", "검방패, 단검, 도와 장봉은 각자의 방어, 패링 또는 반격을 사용합니다. 대검은 방어형 보조 공격이 없어 이동과 대시로 피합니다. 다이너마이트, 레이저와 범위 공격은 항상 우선 회피합니다.", "剣盾、短剣、刀、長棍は各自のガード、パリィ、反撃を使用します。大剣には防御型サブ攻撃がないため移動・ダッシュで回避します。ダイナマイト、レーザー、範囲攻撃は常に優先回避します。" },
             ["AutoChoiceStrategy"] = new[] { "奖励自动选择方式", "獎勵自動選擇方式", "Reward selection", "보상 선택 방식", "報酬選択方式" },
             ["AutoChoicePresetFirst"] = new[] { "优先预设", "優先預設", "Prefer presets", "프리셋 우선", "プリセット優先" },
             ["AutoChoiceFavoriteFirst"] = new[] { "优先收藏", "優先收藏", "Prefer favorites", "즐겨찾기 우선", "お気に入り優先" },

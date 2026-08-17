@@ -32,6 +32,7 @@ namespace SephiriaTogether
             CapturePrefab(spawner);
             if (!NetworkServer.active || floor == null || string.IsNullOrEmpty(floor.guid)) return;
             EFloorMainEventType type = floor.floorMainEventType;
+            if (!string.IsNullOrEmpty(floor.questBoardEventId)) return;
             if (type != EFloorMainEventType.Anvil)
             {
                 HashSet<string> observed = ChoiceFloorSet(type);
@@ -65,6 +66,10 @@ namespace SephiriaTogether
             CatchUpRewards.ConvertPendingAnvils(player.spawner, floorGuid);
             CatchUpRewards.ConvertPendingEnchants(player.spawner, floorGuid);
             CatchUpRewards.ConvertPendingChoiceFloors(player.spawner, floorGuid);
+            FloorGenerator changedFloor = FloorGenerator.FindByGuid(floorGuid);
+            if (changedFloor != null && !string.IsNullOrEmpty(changedFloor.questBoardEventId))
+                foreach (EFloorMainEventType type in new[] { EFloorMainEventType.Miracle, EFloorMainEventType.Charm, EFloorMainEventType.StoneTablet })
+                    CatchUpRewards.ForgetPendingChoiceFloor(player.spawner, floorGuid, type);
             FusionCompensation.OnFloorChanged(player.spawner, floorGuid);
             ChoiceRewardObjects.LockOut(player.spawner);
             if (AnvilFloors.Contains(floorGuid) ||
@@ -77,11 +82,11 @@ namespace SephiriaTogether
                 (DungeonManager.Instance != null && DungeonManager.Instance.generatedFloors.TryGetValue(floorGuid, out FloorData enchantFloor) &&
                  enchantFloor.mainEventType == EFloorMainEventType.Enchant))
                 CatchUpRewards.RecordPendingEnchant(player.spawner, floorGuid);
-            foreach (EFloorMainEventType type in new[] { EFloorMainEventType.Miracle, EFloorMainEventType.Charm, EFloorMainEventType.StoneTablet })
-                if (ChoiceFloorSet(type).Contains(floorGuid)) CatchUpRewards.RecordPendingChoiceFloor(player.spawner, floorGuid, type);
+            if (changedFloor == null || string.IsNullOrEmpty(changedFloor.questBoardEventId))
+                foreach (EFloorMainEventType type in new[] { EFloorMainEventType.Miracle, EFloorMainEventType.Charm, EFloorMainEventType.StoneTablet })
+                    if (ChoiceFloorSet(type).Contains(floorGuid)) CatchUpRewards.RecordPendingChoiceFloor(player.spawner, floorGuid, type);
             if (Plugin.InstanceForPatches != null)
                 Plugin.InstanceForPatches.StartCoroutine(ConfirmAnvilFloor(player.spawner, floorGuid));
-            MidRunJoin.ScheduleExperienceCatchUp(player.spawner);
             ScheduleSpawn(player.spawner);
             CatchUpRewards.ScheduleRewardObjects(player.spawner);
         }
@@ -122,6 +127,8 @@ namespace SephiriaTogether
             else if (eventType == EFloorMainEventType.Miracle || eventType == EFloorMainEventType.Charm ||
                      eventType == EFloorMainEventType.StoneTablet)
             {
+                FloorGenerator confirmedFloor = FloorGenerator.FindByGuid(floorGuid);
+                if (confirmedFloor != null && !string.IsNullOrEmpty(confirmedFloor.questBoardEventId)) yield break;
                 ChoiceFloorSet(eventType).Add(floorGuid);
                 CatchUpRewards.RecordPendingChoiceFloor(player, floorGuid, eventType);
                 CatchUpRewards.ConvertPendingChoiceFloors(player, player?.PlayerAvatar?.currentFloorGuid);

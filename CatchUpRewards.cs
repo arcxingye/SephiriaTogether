@@ -133,6 +133,7 @@ namespace SephiriaTogether
             NetworkServer.RegisterHandler<CatchUpHelloMessage>(OnServerHello, true);
             MidRunJoin.RegisterServerMessages();
             RescueAlerts.RegisterServerMessages();
+            AutoPilot.RegisterServerMessages();
         }
 
         internal static void RegisterClientMessages()
@@ -140,6 +141,7 @@ namespace SephiriaTogether
             ConfigureSerialization();
             NetworkClient.RegisterHandler<CatchUpOfferMessage>(OnClientOffer, true);
             RescueAlerts.RegisterClientMessages();
+            AutoPilot.RegisterClientMessages();
         }
 
         private static void ConfigureSerialization()
@@ -548,6 +550,16 @@ namespace SephiriaTogether
             HashSet<string> pending = PendingChoiceSet(credits, type);
             if (pending == null || string.IsNullOrEmpty(floorGuid) || !pending.Add(floorGuid)) return;
             Plugin.LogInfo($"Pending {type} floor recorded: player={player?.PlayerAvatar?.Name}, floor={ShortGuid(floorGuid)}, count={pending.Count}.");
+            Save(credits);
+        }
+
+        internal static void ForgetPendingChoiceFloor(PlayerSpawner player, string floorGuid, EFloorMainEventType type)
+        {
+            Credits credits = GetServerCredits(player);
+            HashSet<string> pending = PendingChoiceSet(credits, type);
+            if (pending == null || string.IsNullOrEmpty(floorGuid) || !pending.Remove(floorGuid)) return;
+            Plugin.LogInfo($"Ignored pending {type} compensation for quest floor: player={player?.PlayerAvatar?.Name}, " +
+                           $"floor={ShortGuid(floorGuid)}.");
             Save(credits);
         }
 
