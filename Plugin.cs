@@ -14,7 +14,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.4.2";
+        public const string PluginVersion = "3.5.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> healthPerExtraPlayer;
@@ -31,6 +31,15 @@ namespace SephiriaTogether
         internal static ConfigEntry<int> playerLimit;
         internal static ConfigEntry<KeyboardShortcut> menuShortcut;
         internal static ConfigEntry<KeyboardShortcut> rescueShortcut;
+        internal static ConfigEntry<KeyboardShortcut> autoPilotShortcut;
+        internal static ConfigEntry<int> autoChoiceStrategy;
+        internal static ConfigEntry<string> autoChoicePresets;
+        internal static ConfigEntry<string> autoWeaponPresets;
+        internal static ConfigEntry<string> autoFloorPresets;
+        internal static ConfigEntry<bool> autoArrangeInventory;
+        internal static ConfigEntry<int> autoFullInventoryStrategy;
+        internal static ConfigEntry<bool> autoDefend;
+        private static ConfigEntry<bool> autoFloorDefaultsInitialized;
         internal static ConfigEntry<bool> autoReviveWhenClear;
         internal static ConfigEntry<bool> bossLifesteal;
         private Harmony harmony;
@@ -54,6 +63,62 @@ namespace SephiriaTogether
                 "RescueShortcut",
                 new KeyboardShortcut(KeyCode.R),
                 "Shortcut a downed player uses to request rescue from modded teammates.");
+            autoPilotShortcut = Config.Bind(
+                "Interface",
+                "AutoPilotShortcut",
+                new KeyboardShortcut(KeyCode.F9),
+                "Shortcut used to enable or disable conservative AFK autopilot.");
+            autoChoiceStrategy = Config.Bind(
+                "Autopilot",
+                "ChoiceStrategy",
+                0,
+                new ConfigDescription(
+                    "0: prefer preset matches, 1: prefer heart-marked favorites, 2: always wait. Prefer modes fall back to a random highest-rarity reward.",
+                    new AcceptableValueRange<int>(0, 2)));
+            autoChoicePresets = Config.Bind(
+                "Autopilot",
+                "ChoicePresets",
+                "FlameSword,Precision,WindSong",
+                "Ordered reward item/category IDs preferred by autopilot. Configure this from the F8 menu.");
+            autoWeaponPresets = Config.Bind(
+                "Autopilot",
+                "WeaponPresets",
+                "",
+                "Ordered weapon enhancement IDs preferred by autopilot. Configure this from the F8 menu.");
+            autoFloorPresets = Config.Bind(
+                "Autopilot",
+                "FloorPresets",
+                "floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP",
+                "Ordered next-floor event types preferred by autopilot. Configure this from the F8 menu.");
+            autoFloorDefaultsInitialized = Config.Bind(
+                "Autopilot",
+                "FloorDefaultsInitialized",
+                false,
+                "Internal migration marker for the default next-floor priority.");
+            if (!autoFloorDefaultsInitialized.Value)
+            {
+                if (string.IsNullOrWhiteSpace(autoFloorPresets.Value))
+                    autoFloorPresets.Value = "floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP";
+                autoFloorDefaultsInitialized.Value = true;
+                Config.Save();
+            }
+            autoArrangeInventory = Config.Bind(
+                "Autopilot",
+                "AutoArrangeInventory",
+                false,
+                "Automatically use the game's best charm-level inventory arranger while autopilot is enabled and out of combat.");
+            autoFullInventoryStrategy = Config.Bind(
+                "Autopilot",
+                "FullInventoryStrategy",
+                2,
+                new ConfigDescription(
+                    "0: never discard, 1: replace lower-rarity unfavorited Charms only, 2: also replace safe ordinary items.",
+                    new AcceptableValueRange<int>(0, 2)));
+            autoDefend = Config.Bind(
+                "Autopilot",
+                "AutoDefend",
+                true,
+                "Use supported vanilla weapon guard or parry inputs against predicted incoming attacks.");
             autoReviveWhenClear = Config.Bind(
                 "Multiplayer",
                 "AutoReviveWhenClear",
@@ -187,12 +252,14 @@ namespace SephiriaTogether
             AutoRevivePatch.Clear();
             CatchUpRewards.ClearClientState();
             CatchUpRewards.ClearServerState();
+            AutoPilot.Clear();
         }
 
         private void OnGUI()
         {
             RescueAlerts.Draw();
             VersionReminder.Draw();
+            AutoPilot.Draw();
             CoopMenu.Draw();
         }
 
@@ -202,6 +269,8 @@ namespace SephiriaTogether
             {
                 CoopMenu.Toggle();
             }
+            if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen && autoPilotShortcut.Value.IsDown())
+                AutoPilot.Toggle();
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
         }

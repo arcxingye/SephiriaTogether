@@ -6,7 +6,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>SephiriaTogether</AssemblyName>
     <RootNamespace>SephiriaTogether</RootNamespace>
-    <Version>3.4.2</Version>
+    <Version>3.5.0</Version>
     <GameDir Condition="'$(GameDir)' == '' and '$(SEPHIRIA_DIR)' != ''">$(SEPHIRIA_DIR)</GameDir>
   </PropertyGroup>
 
@@ -53,6 +53,10 @@
     </Reference>
     <Reference Include="UnityEngine.InputLegacyModule">
       <HintPath>$(GameDir)\Sephiria_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.Physics2DModule">
+      <HintPath>$(GameDir)\Sephiria_Data\Managed\UnityEngine.Physics2DModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">

@@ -22,6 +22,7 @@ namespace SephiriaTogether
         private static GUIStyle dangerButton;
         private static GUIStyle input;
         private static GUIStyle badge;
+        private static GUIStyle tagButton;
         private static GUIStyle toggleOn;
         private static GUIStyle toggleOff;
         private static Texture2D windowTexture;
@@ -39,9 +40,23 @@ namespace SephiriaTogether
         private static bool previousInputBlock;
         private static string playerLimitText;
         private static Vector2 scroll;
+        private static Vector2 rewardDropdownScroll;
+        private static Vector2 weaponDropdownScroll;
+        private static readonly List<PresetOption> RewardPresetOptions = new List<PresetOption>();
+        private static readonly List<PresetOption> WeaponPresetOptions = new List<PresetOption>();
+        private static readonly List<PresetOption> FloorPresetOptions = new List<PresetOption>();
+        private static int selectedRewardPreset;
+        private static int selectedWeaponPreset;
+        private static int selectedFloorPreset;
+        private static bool showRewardDropdown;
+        private static bool showWeaponDropdown;
+        private static bool showFloorDropdown;
+        private static Vector2 floorDropdownScroll;
+        private static string weaponPresetStatus;
         private static bool showAdvancedScaling;
         private static int selectedTab;
         private static int hostRulesTab;
+        private static int autoPresetTab;
         private static int capturingShortcut;
 
         internal static bool IsCapturingShortcut => capturingShortcut != 0;
@@ -63,6 +78,7 @@ namespace SephiriaTogether
                     blockedController.BlockAvatarInput = true;
                 }
                 playerLimitText = PlayerLimit.CurrentLimit.ToString();
+                RefreshPresetOptions();
             }
             else
             {
@@ -116,6 +132,13 @@ namespace SephiriaTogether
             GUILayout.EndHorizontal();
             DrawDivider();
             DrawTabs();
+            if (selectedTab == 1)
+            {
+                DrawAutoPilotPage();
+                GUILayout.EndVertical();
+                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
+                return;
+            }
             if (!NetworkServer.active)
             {
                 DrawClientPage();
@@ -130,7 +153,7 @@ namespace SephiriaTogether
                 GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
                 return;
             }
-            scroll = GUILayout.BeginScrollView(scroll);
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
             GUILayout.Space(8f);
             GUILayout.Label(MenuText.Get("NextSpawn"), muted);
             DrawValue(MenuText.Get("MenuShortcut"), Plugin.menuShortcut.Value.ToString(), 180f);
@@ -156,8 +179,6 @@ namespace SephiriaTogether
             {
                 capturingShortcut = 2;
             }
-            GUILayout.Space(10f);
-
             DrawHostRuleTabs();
 
             if (hostRulesTab == 0)
@@ -216,7 +237,6 @@ namespace SephiriaTogether
             if (GUILayout.Button(MenuText.Get("PresetStandard"), currentPreset == 2 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(2);
             if (GUILayout.Button(MenuText.Get("PresetHigh"), currentPreset == 3 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(3);
             GUILayout.EndHorizontal();
-            GUILayout.Space(8f);
             int activePlayers = Mathf.Max(1, PlayerSpawner.MultiplayerList != null ? PlayerSpawner.MultiplayerList.Count : 1);
             int extraPlayers = Mathf.Max(0, activePlayers - Plugin.BaselinePlayersValue);
             float healthMultiplier = 1f + extraPlayers * Plugin.HealthPerExtraPlayerValue;
@@ -251,7 +271,7 @@ namespace SephiriaTogether
             if (GUILayout.Button("+5%", button, GUILayout.Height(32f))) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue + 0.05f);
             GUILayout.EndHorizontal();
             DrawValue(MenuText.Get("HpCap"), Plugin.MaximumMultiplierValue.ToString("0.##") + "x");
-            if (GUILayout.Button("Cycle cap 4x / 8x / 12x / uncapped", button, GUILayout.Height(32f)))
+            if (GUILayout.Button(MenuText.Get("CycleHpCap"), button, GUILayout.Height(32f)))
             {
                 float value = Plugin.MaximumMultiplierValue;
                 Plugin.SetMaximumMultiplier(value < 4.1f ? 8f : value < 8.1f ? 12f : value < 12.1f ? 0f : 4f);
@@ -299,7 +319,7 @@ namespace SephiriaTogether
             }
 
             CatchUpRewards.SendHello();
-            scroll = GUILayout.BeginScrollView(scroll);
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
             GUILayout.Space(8f);
             BeginSection(MenuText.Get("ClientCompensation"));
             GUILayout.Label(MenuText.Get("ClientAutoGranted"), muted);
@@ -358,7 +378,7 @@ namespace SephiriaTogether
 
         private static void DrawTabs()
         {
-            string[] labels = { "TabRules", "TabCompensation", "TabDiagnostics", "TabHistory" };
+            string[] labels = { "TabRules", "TabAutoPilot", "TabCompensation", "TabDiagnostics", "TabHistory" };
             GUILayout.BeginHorizontal();
             for (int i = 0; i < labels.Length; i++)
             {
@@ -416,7 +436,8 @@ namespace SephiriaTogether
             BepInEx.Configuration.KeyboardShortcut shortcut =
                 new BepInEx.Configuration.KeyboardShortcut(Event.current.keyCode, modifiers);
             if (capturingShortcut == 1) Plugin.menuShortcut.Value = shortcut;
-            else Plugin.rescueShortcut.Value = shortcut;
+            else if (capturingShortcut == 2) Plugin.rescueShortcut.Value = shortcut;
+            else Plugin.autoPilotShortcut.Value = shortcut;
             Plugin.SaveSettings();
             capturingShortcut = 0;
             Event.current.Use();
@@ -425,20 +446,20 @@ namespace SephiriaTogether
         private static void DrawClientPage()
         {
             CatchUpRewards.SendHello();
-            if (selectedTab == 1)
+            if (selectedTab == 2)
             {
                 DrawClientCompensation();
                 return;
             }
-            scroll = GUILayout.BeginScrollView(scroll);
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
             GUILayout.Space(8f);
             string heading = selectedTab == 0 ? MenuText.Get("TabRules")
-                : selectedTab == 2 ? MenuText.Get("TabDiagnostics") : MenuText.Get("TabHistory");
+                : selectedTab == 3 ? MenuText.Get("TabDiagnostics") : MenuText.Get("TabHistory");
             string content = selectedTab == 0 ? CatchUpRewards.ClientRules
-                : selectedTab == 2 ? CatchUpRewards.ClientDiagnostics : CatchUpRewards.ClientHistory;
+                : selectedTab == 3 ? CatchUpRewards.ClientDiagnostics : CatchUpRewards.ClientHistory;
             BeginSection(heading);
             GUILayout.Label(string.IsNullOrEmpty(content) ? MenuText.Get("NoData") : content, body);
-            if (selectedTab == 2)
+            if (selectedTab == 3)
             {
                 DrawDownloadLinks();
             }
@@ -446,18 +467,369 @@ namespace SephiriaTogether
             GUILayout.EndScrollView();
         }
 
+        private static void DrawAutoPilotPage()
+        {
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
+            GUILayout.Space(8f);
+            BeginSection(MenuText.Get("TabAutoPilot"));
+            DrawLocalAutoPilotControls();
+            DrawAutoChoiceSettings();
+            EndSection();
+            GUILayout.EndScrollView();
+        }
+
+        private static void DrawAutoChoiceSettings()
+        {
+            GUILayout.Space(8f);
+            GUILayout.Label(MenuText.Get("AutoChoiceStrategy"), section);
+            GUILayout.BeginHorizontal();
+            string[] labels = { "AutoChoicePresetFirst", "AutoChoiceFavoriteFirst", "AutoChoiceWait" };
+            for (int i = 0; i < labels.Length; i++)
+                if (GUILayout.Button(MenuText.Get(labels[i]), Plugin.autoChoiceStrategy.Value == i ? primaryButton : button,
+                        GUILayout.Height(32f)))
+                {
+                    Plugin.autoChoiceStrategy.Value = i;
+                    if (i != 0 && autoPresetTab == 0) autoPresetTab = 1;
+                    Plugin.SaveSettings();
+                }
+            GUILayout.EndHorizontal();
+            GUILayout.Space(6f);
+            GUILayout.Label(MenuText.Get("FullInventoryStrategy"), body);
+            GUILayout.BeginHorizontal();
+            string[] fullLabels = { "FullInventoryWait", "FullInventoryCharm", "FullInventoryOrdinary" };
+            for (int i = 0; i < fullLabels.Length; i++)
+                if (GUILayout.Button(MenuText.Get(fullLabels[i]),
+                        Plugin.autoFullInventoryStrategy.Value == i ? primaryButton : button, GUILayout.Height(30f)))
+                {
+                    Plugin.autoFullInventoryStrategy.Value = i;
+                    Plugin.SaveSettings();
+                }
+            GUILayout.EndHorizontal();
+            GUILayout.Label(MenuText.Get("FullInventoryHelp"), muted);
+            GUILayout.Space(8f);
+            GUILayout.BeginHorizontal();
+            string[] tabs = { "RewardPresetTab", "WeaponPresetTab", "FloorPresetTab" };
+            for (int i = 0; i < tabs.Length; i++)
+            {
+                bool disabled = i == 0 && Plugin.autoChoiceStrategy.Value != 0;
+                GUI.enabled = !disabled;
+                if (GUILayout.Button(MenuText.Get(tabs[i]), disabled ? toggleOff : autoPresetTab == i ? primaryButton : button,
+                        GUILayout.Height(30f)))
+                {
+                    autoPresetTab = i;
+                    showRewardDropdown = false;
+                    showWeaponDropdown = false;
+                    showFloorDropdown = false;
+                }
+                GUI.enabled = true;
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.BeginVertical(card);
+            if (autoPresetTab == 0)
+                DrawPresetPicker(MenuText.Get("RewardPresets"), MenuText.Get("RewardPresetsHelp"),
+                    RewardPresetOptions, Plugin.autoChoicePresets, ref selectedRewardPreset,
+                    ref showRewardDropdown, ref rewardDropdownScroll);
+            else if (autoPresetTab == 1)
+            {
+                if (!string.IsNullOrEmpty(weaponPresetStatus)) GUILayout.Label(weaponPresetStatus, muted);
+                DrawPresetPicker(MenuText.Get("WeaponPresets"), MenuText.Get("WeaponPresetsHelp"),
+                    WeaponPresetOptions, Plugin.autoWeaponPresets, ref selectedWeaponPreset,
+                    ref showWeaponDropdown, ref weaponDropdownScroll);
+            }
+            else
+                DrawPresetPicker(MenuText.Get("FloorPresets"), MenuText.Get("FloorPresetsHelp"),
+                    FloorPresetOptions, Plugin.autoFloorPresets, ref selectedFloorPreset,
+                    ref showFloorDropdown, ref floorDropdownScroll);
+            GUILayout.EndVertical();
+        }
+
+        private static void DrawLocalAutoPilotControls()
+        {
+            GUILayout.Space(8f);
+            GUILayout.Label(MenuText.Get("AutoPilotLocalSettings"), section);
+            DrawValue(MenuText.Get("AutoPilotShortcut"), Plugin.autoPilotShortcut.Value.ToString(), 180f);
+            if (capturingShortcut == 3)
+            {
+                GUILayout.Label(MenuText.Get("PressNewAutoPilotShortcut"), muted);
+                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
+                    capturingShortcut = 0;
+            }
+            else if (GUILayout.Button(MenuText.Get("ChangeAutoPilotShortcut"), button, GUILayout.Height(30f)))
+            {
+                capturingShortcut = 3;
+            }
+            GUILayout.Label(MenuText.Get("AutoPilotHelp"), muted);
+            if (GUILayout.Button(MenuText.Get(AutoPilot.Enabled ? "DisableAutoPilot" : "EnableAutoPilot"),
+                    AutoPilot.Enabled ? dangerButton : primaryButton, GUILayout.Height(34f)))
+                AutoPilot.Toggle();
+            DrawToggle(MenuText.Get("AutoArrangeInventory"), Plugin.autoArrangeInventory);
+            GUILayout.Label(MenuText.Get("AutoArrangeInventoryHelp"), muted);
+            DrawToggle(MenuText.Get("AutoDefend"), Plugin.autoDefend);
+            GUILayout.Label(MenuText.Get("AutoDefendHelp"), muted);
+        }
+
+        private static void DrawPresetPicker(string heading, string help, List<PresetOption> options,
+            BepInEx.Configuration.ConfigEntry<string> config, ref int selected, ref bool expanded, ref Vector2 dropdownScroll)
+        {
+            GUILayout.Label(heading, section);
+            List<string> values = SplitPresetValues(config.Value);
+            if (values.Count == 0) GUILayout.Label(MenuText.Get("NoPresetSelected"), muted);
+            else DrawPresetTags(options, config, values);
+
+            if (options.Count > 0)
+            {
+                selected = Mathf.Clamp(selected, 0, options.Count - 1);
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button(options[selected].Label + (expanded ? "  ▲" : "  ▼"), button, GUILayout.Height(32f)))
+                    expanded = !expanded;
+                if (GUILayout.Button(MenuText.Get("AddPreset"), primaryButton, GUILayout.Width(100f), GUILayout.Height(32f)) &&
+                    !values.Contains(options[selected].Value))
+                {
+                    values.Add(options[selected].Value);
+                    SavePresetValues(config, values);
+                }
+                GUILayout.EndHorizontal();
+                if (expanded)
+                {
+                    dropdownScroll = GUILayout.BeginScrollView(dropdownScroll, GUILayout.Height(180f),
+                        GUILayout.ExpandWidth(true));
+                    for (int i = 0; i < options.Count; i++)
+                        if (GUILayout.Button(options[i].Label, i == selected ? primaryButton : button, GUILayout.Height(28f)))
+                        {
+                            selected = i;
+                            expanded = false;
+                        }
+                    GUILayout.EndScrollView();
+                }
+            }
+            else if (config != Plugin.autoWeaponPresets || string.IsNullOrEmpty(weaponPresetStatus))
+                GUILayout.Label(MenuText.Get("PresetDataUnavailable"), muted);
+            GUILayout.Label(help, muted);
+        }
+
+        private static void DrawPresetTags(List<PresetOption> options,
+            BepInEx.Configuration.ConfigEntry<string> config, List<string> values)
+        {
+            float available = Mathf.Max(260f, window.width - 70f);
+            float used = 0f;
+            GUILayout.BeginHorizontal();
+            foreach (string value in values.ToArray())
+            {
+                string label = PresetLabel(options, value) + "  X";
+                float width = Mathf.Clamp(tagButton.CalcSize(new GUIContent(label)).x + 10f, 78f, available);
+                if (used > 0f && used + width + 5f > available)
+                {
+                    GUILayout.EndHorizontal();
+                    GUILayout.BeginHorizontal();
+                    used = 0f;
+                }
+                if (GUILayout.Button(label, tagButton, GUILayout.Width(width), GUILayout.Height(28f)))
+                {
+                    values.Remove(value);
+                    SavePresetValues(config, values);
+                }
+                used += width + 5f;
+            }
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+        }
+
+        private static void RefreshPresetOptions()
+        {
+            RewardPresetOptions.Clear();
+            WeaponPresetOptions.Clear();
+            FloorPresetOptions.Clear();
+            weaponPresetStatus = null;
+            try
+            {
+                foreach (ItemCategoryEntity category in Resources.LoadAll<ItemCategoryEntity>("ItemCategory")
+                             .Where(category => category != null && category.isEnabled &&
+                                                IsValidDisplayName(category.Name, category.categoryName.key))
+                             .OrderBy(category => category.Name))
+                    RewardPresetOptions.Add(new PresetOption("category:" + category.id,
+                        MenuText.Get("CategoryPrefix") + category.Name, category.id, category.Name,
+                        category.categoryName.key));
+
+                foreach (int id in ItemDatabase.GetAllItemID())
+                {
+                    ItemEntity item = ItemDatabase.FindItemById(id);
+                    if (item != null && !item.cannotBeReward && IsValidDisplayName(item.Name, item.aName.key))
+                        RewardPresetOptions.Add(new PresetOption("item:" + item.id, item.Name,
+                            item.id.ToString(), item.Name, item.aName.key));
+                }
+                RewardPresetOptions.Sort((left, right) => string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
+
+                PlayerAvatar localPlayer = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
+                WeaponControllerSimple weaponController = localPlayer != null
+                    ? localPlayer.GetComponent<WeaponControllerSimple>()
+                    : null;
+                WeaponSimple currentWeapon = weaponController != null ? weaponController.currentWeapon : null;
+                if (currentWeapon == null)
+                {
+                    weaponPresetStatus = MenuText.Get("WeaponPresetNoWeapon");
+                }
+                else
+                {
+                    List<EnhancementMetadata> enhancements = WeaponDatabase.GetWeaponEnhancements(currentWeapon.entityId);
+                    if (enhancements == null || enhancements.Count == 0)
+                    {
+                        weaponPresetStatus = MenuText.Get("WeaponPresetMaxed");
+                    }
+                    else
+                    {
+                        AddReachableWeaponOptions(currentWeapon.entityId, 1, new HashSet<int>());
+                        WeaponEntity equipped = WeaponDatabase.FindWeaponById(currentWeapon.entityId);
+                        string currentName = equipped != null ? equipped.Name : currentWeapon.entityId.ToString();
+                        weaponPresetStatus = string.Format(MenuText.Get("WeaponPresetCurrent"), currentName);
+                    }
+                }
+                WeaponPresetOptions.Sort((left, right) => string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
+
+                foreach (EFloorMainEventType eventType in Enum.GetValues(typeof(EFloorMainEventType)))
+                {
+                    if (eventType == EFloorMainEventType.None || eventType == EFloorMainEventType.Unknown ||
+                        eventType == EFloorMainEventType.RandomEncounter) continue;
+                    string label = FloorEventLabel(eventType);
+                    FloorPresetOptions.Add(new PresetOption("floor:" + eventType, label, eventType.ToString()));
+                }
+                FloorPresetOptions.Sort((left, right) => string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
+                MigrateLegacyPresets();
+                RemoveInvalidStablePresets(Plugin.autoChoicePresets, RewardPresetOptions, "item:", "category:");
+                if (currentWeapon != null)
+                    RemoveInvalidStablePresets(Plugin.autoWeaponPresets, WeaponPresetOptions, "weapon:");
+                RemoveInvalidStablePresets(Plugin.autoFloorPresets, FloorPresetOptions, "floor:");
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogInfo("Could not load autopilot preset options: " + exception.Message);
+            }
+        }
+
+        private static List<string> SplitPresetValues(string value) => (value ?? "")
+            .Split(new[] { ',', '，', ';', '；', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(entry => entry.Trim()).Where(entry => entry.Length > 0).ToList();
+
+        private static string PresetLabel(List<PresetOption> options, string value)
+        {
+            PresetOption option = options.FirstOrDefault(candidate =>
+                string.Equals(candidate.Value, value, StringComparison.OrdinalIgnoreCase) || candidate.MatchesLegacy(value));
+            return option != null ? option.Label : MenuText.Get("UnavailablePreset");
+        }
+
+        private static bool IsValidDisplayName(string value, string localizationKey)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            string clean = System.Text.RegularExpressions.Regex.Replace(value, "<[^>]+>", "").Trim();
+            if (clean.Length < 2 || !clean.Any(char.IsLetterOrDigit)) return false;
+            if (!string.IsNullOrEmpty(localizationKey) &&
+                string.Equals(clean, localizationKey, StringComparison.OrdinalIgnoreCase)) return false;
+            return !(clean.StartsWith("Item_", StringComparison.OrdinalIgnoreCase) &&
+                     clean.EndsWith("_Name", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void AddReachableWeaponOptions(int weaponId, int tier, HashSet<int> visited)
+        {
+            if (!visited.Add(weaponId)) return;
+            foreach (EnhancementMetadata enhancement in
+                     WeaponDatabase.GetWeaponEnhancements(weaponId) ?? new List<EnhancementMetadata>())
+            {
+                WeaponEntity weapon = enhancement?.enhanced;
+                if (weapon == null || !enhancement.enabled) continue;
+                if (IsValidDisplayName(weapon.Name, weapon.aName.key) &&
+                    !WeaponPresetOptions.Any(option => option.Value == "weapon:" + weapon.id))
+                    WeaponPresetOptions.Add(new PresetOption("weapon:" + weapon.id,
+                        string.Format(MenuText.Get("WeaponPresetTier"), tier, weapon.Name),
+                        weapon.id.ToString(), weapon.Name, weapon.aName.key));
+                AddReachableWeaponOptions(weapon.id, tier + 1, visited);
+            }
+        }
+
+        private static string FloorEventLabel(EFloorMainEventType eventType)
+        {
+            switch (eventType)
+            {
+                case EFloorMainEventType.Money: return MenuText.Get("RoomMoney");
+                case EFloorMainEventType.EXP: return MenuText.Get("RoomExp");
+                case EFloorMainEventType.HP: return MenuText.Get("RoomHeal");
+                case EFloorMainEventType.Merchant: return MenuText.Get("RoomMerchant");
+                case EFloorMainEventType.Miracle: return MenuText.Get("RoomMiracle");
+                case EFloorMainEventType.Charm: return MenuText.Get("RoomCharm");
+                case EFloorMainEventType.StoneTablet: return MenuText.Get("RoomTablet");
+                case EFloorMainEventType.Enchant: return MenuText.Get("RoomEnchant");
+                case EFloorMainEventType.Anvil: return MenuText.Get("RoomAnvil");
+                case EFloorMainEventType.Dice: return MenuText.Get("RoomDice");
+                case EFloorMainEventType.Sapphire: return MenuText.Get("RoomSapphire");
+                case EFloorMainEventType.MaxHP: return MenuText.Get("RoomMaxHp");
+                case EFloorMainEventType.InventoryStorage: return MenuText.Get("RoomInventory");
+                default: return MenuText.Get("UnknownFloorEvent");
+            }
+        }
+
+        private static void MigrateLegacyPresets()
+        {
+            List<string> legacy = SplitPresetValues(Plugin.autoChoicePresets.Value);
+            if (!legacy.Any(value => value.IndexOf(':') < 0)) return;
+
+            List<string> rewards = legacy.Where(value => value.IndexOf(':') >= 0).ToList();
+            List<string> weapons = SplitPresetValues(Plugin.autoWeaponPresets.Value);
+            foreach (string value in legacy.Where(value => value.IndexOf(':') < 0))
+            {
+                PresetOption reward = RewardPresetOptions.FirstOrDefault(option => option.MatchesLegacy(value));
+                PresetOption weapon = WeaponPresetOptions.FirstOrDefault(option => option.MatchesLegacy(value));
+                if (reward != null && !rewards.Contains(reward.Value)) rewards.Add(reward.Value);
+                if (weapon != null && !weapons.Contains(weapon.Value)) weapons.Add(weapon.Value);
+                if (reward == null && weapon == null) rewards.Add(value);
+            }
+            SavePresetValues(Plugin.autoChoicePresets, rewards);
+            SavePresetValues(Plugin.autoWeaponPresets, weapons);
+        }
+
+        private static void SavePresetValues(BepInEx.Configuration.ConfigEntry<string> config, List<string> values)
+        {
+            config.Value = string.Join(",", values);
+            Plugin.SaveSettings();
+        }
+
+        private static void RemoveInvalidStablePresets(BepInEx.Configuration.ConfigEntry<string> config,
+            List<PresetOption> options, params string[] prefixes)
+        {
+            List<string> values = SplitPresetValues(config.Value);
+            int removed = values.RemoveAll(value => prefixes.Any(prefix =>
+                value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) &&
+                !options.Any(option => string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase)));
+            if (removed > 0) SavePresetValues(config, values);
+        }
+
+        private sealed class PresetOption
+        {
+            internal readonly string Value;
+            internal readonly string Label;
+            private readonly string[] aliases;
+
+            internal PresetOption(string value, string label, params string[] aliases)
+            {
+                Value = value;
+                Label = label;
+                this.aliases = aliases ?? new string[0];
+            }
+
+            internal bool MatchesLegacy(string value) => !string.IsNullOrWhiteSpace(value) && aliases.Any(alias =>
+                !string.IsNullOrEmpty(alias) && alias.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
         private static void DrawHostPage()
         {
-            scroll = GUILayout.BeginScrollView(scroll);
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
             GUILayout.Space(8f);
-            if (selectedTab == 1)
+            if (selectedTab == 2)
             {
                 BeginSection(MenuText.Get("TabCompensation"));
                 GUILayout.Label(MenuText.Get("HostCompensation"), body);
                 EndSection();
                 DrawPlayers();
             }
-            else if (selectedTab == 2)
+            else if (selectedTab == 3)
             {
                 BeginSection(MenuText.Get("TabDiagnostics"));
                 GUILayout.Label(CatchUpRewards.BuildHostDiagnostics(null), body);
@@ -510,7 +882,7 @@ namespace SephiriaTogether
                 GUILayout.Label(state, badge, GUILayout.Width(90f), GUILayout.Height(26f));
                 GUILayout.EndHorizontal();
                 string details = MenuText.Get("Level") + " " + (level != null ? level.currentLevel : 0) +
-                                 "     HP " + player.PlayerAvatar.hp.ToString("0") + " / " + player.PlayerAvatar.MaxHp.ToString("0") +
+                                  "     " + MenuText.Get("Health") + " " + player.PlayerAvatar.hp.ToString("0") + " / " + player.PlayerAvatar.MaxHp.ToString("0") +
                                   "     " + MenuText.Get("Floor") + " " + FloorDisplay.Format(player.PlayerAvatar.currentFloorGuid);
                 GUILayout.Label(details, muted);
                 if (!player.isHost && player.connectionToClient != null)
@@ -616,7 +988,8 @@ namespace SephiriaTogether
             GUILayout.BeginHorizontal();
             GUILayout.Label(label, body);
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button(enabled ? "ON" : "OFF", enabled ? toggleOn : toggleOff, GUILayout.Width(72f), GUILayout.Height(30f)))
+            if (GUILayout.Button(MenuText.Get(enabled ? "ToggleOn" : "ToggleOff"), enabled ? toggleOn : toggleOff,
+                    GUILayout.Width(72f), GUILayout.Height(30f)))
             {
                 toggle();
             }
@@ -680,6 +1053,9 @@ namespace SephiriaTogether
             input.focused.textColor = Color.white;
             badge = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, padding = new RectOffset(7, 7, 3, 3) };
             badge.normal.background = buttonTexture;
+            tagButton = CreateButtonStyle(buttonTexture, dangerTexture, text);
+            tagButton.fontStyle = FontStyle.Normal;
+            tagButton.padding = new RectOffset(9, 9, 4, 4);
             toggleOn = CreateButtonStyle(primaryTexture, primaryHoverTexture, Color.white);
             toggleOff = CreateButtonStyle(buttonTexture, buttonHoverTexture, dim);
         }

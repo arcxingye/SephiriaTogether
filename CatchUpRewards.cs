@@ -295,7 +295,10 @@ namespace SephiriaTogether
                 }
 
                 string fusionKey = guid + ":Fusion";
-                if (FusionCompensation.IsObservedFloor(guid) && !credits.CountedFloors.Contains(fusionKey))
+                bool tabletFusionChoice = floor.mainEventType == EFloorMainEventType.StoneTablet &&
+                                          FusionCompensation.IsObservedFloor(guid);
+                if (!tabletFusionChoice && FusionCompensation.IsObservedFloor(guid) &&
+                    !credits.CountedFloors.Contains(fusionKey))
                 {
                     credits.Fusions++;
                     credits.CountedFloors.Add(fusionKey);
@@ -353,6 +356,7 @@ namespace SephiriaTogether
         internal static void RecordPendingFusion(PlayerSpawner player, string floorGuid)
         {
             Credits credits = GetServerCredits(player);
+            if (credits.CountedFloors.Contains(TabletFusionChoiceKey(floorGuid))) return;
             if (string.IsNullOrEmpty(floorGuid) || !credits.PendingFusionFloors.Add(floorGuid)) return;
             Plugin.LogInfo($"Pending Tablet Fusion floor recorded: player={player?.PlayerAvatar?.Name}, floor={ShortGuid(floorGuid)}.");
             Save(credits);
@@ -361,8 +365,27 @@ namespace SephiriaTogether
         internal static void ConvertPendingFusions(PlayerSpawner player, string currentFloorGuid)
         {
             Credits credits = GetServerCredits(player);
-            bool changed = ConvertChoiceSet(credits.PendingFusionFloors, currentFloorGuid,
-                () => credits.Fusions++, "Tablet Fusion", credits);
+            bool changed = false;
+            foreach (string floor in credits.PendingFusionFloors.ToArray())
+            {
+                if (floor == currentFloorGuid) continue;
+                credits.PendingFusionFloors.Remove(floor);
+                if (IsTabletFusionChoiceFloor(floor))
+                {
+                    credits.PendingTabletFloors.Remove(floor);
+                    credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+                    credits.Tablets++;
+                    AddHistory(credits, "Catch-up: unclaimed Tablet/Fusion choice -> StoneTablet @ " + ShortGuid(floor));
+                    Plugin.LogInfo($"Mutual Tablet/Fusion choice converted once: player={player?.PlayerAvatar?.Name}, " +
+                                   $"floor={ShortGuid(floor)}, grant=StoneTablet.");
+                }
+                else
+                {
+                    credits.Fusions++;
+                    AddHistory(credits, "Catch-up: unclaimed Tablet Fusion @ " + ShortGuid(floor));
+                }
+                changed = true;
+            }
             if (!changed) return;
             Save(credits);
             Plugin.LogInfo($"Pending Tablet Fusion converted: player={player?.PlayerAvatar?.Name}, fusionCredits={credits.Fusions}.");
@@ -372,8 +395,13 @@ namespace SephiriaTogether
         {
             Credits credits = GetServerCredits(player);
             string floor = player?.PlayerAvatar?.currentFloorGuid;
-            if (string.IsNullOrEmpty(floor) || !credits.PendingFusionFloors.Remove(floor)) return;
-            Plugin.LogInfo($"Original Tablet Fusion used: player={player.PlayerAvatar?.Name}, floor={ShortGuid(floor)}.");
+            if (string.IsNullOrEmpty(floor)) return;
+            bool fusion = credits.PendingFusionFloors.Remove(floor);
+            bool tablet = credits.PendingTabletFloors.Remove(floor);
+            if (!fusion && !tablet) return;
+            credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+            Plugin.LogInfo($"Original Tablet Fusion used: player={player.PlayerAvatar?.Name}, floor={ShortGuid(floor)}, " +
+                           $"clearedFusion={fusion}, clearedTabletAlternative={tablet}.");
             player.SaveCurrentSessionData();
             Save(credits);
         }
@@ -383,6 +411,13 @@ namespace SephiriaTogether
             Credits credits = GetServerCredits(player);
             string floor = player?.PlayerAvatar?.currentFloorGuid;
             if (string.IsNullOrEmpty(floor) || !credits.PendingFusionFloors.Remove(floor)) return false;
+            if (IsTabletFusionChoiceFloor(floor))
+            {
+                Save(credits);
+                Plugin.LogInfo($"Current Tablet Fusion unavailable on mutual-choice floor; preserving only Tablet alternative: " +
+                               $"player={player.PlayerAvatar?.Name}, floor={ShortGuid(floor)}.");
+                return false;
+            }
             credits.Fusions++;
             AddHistory(credits, "Catch-up: no personal Tablet Fusion spawned @ " + ShortGuid(floor));
             Save(credits);
@@ -508,6 +543,8 @@ namespace SephiriaTogether
         internal static void RecordPendingChoiceFloor(PlayerSpawner player, string floorGuid, EFloorMainEventType type)
         {
             Credits credits = GetServerCredits(player);
+            if (type == EFloorMainEventType.StoneTablet &&
+                credits.CountedFloors.Contains(TabletFusionChoiceKey(floorGuid))) return;
             HashSet<string> pending = PendingChoiceSet(credits, type);
             if (pending == null || string.IsNullOrEmpty(floorGuid) || !pending.Add(floorGuid)) return;
             Plugin.LogInfo($"Pending {type} floor recorded: player={player?.PlayerAvatar?.Name}, floor={ShortGuid(floorGuid)}, count={pending.Count}.");
@@ -519,7 +556,7 @@ namespace SephiriaTogether
             Credits credits = GetServerCredits(player);
             bool changed = ConvertChoiceSet(credits.PendingMiracleFloors, currentFloorGuid, () => credits.Miracles++, "Miracle", credits) |
                            ConvertChoiceSet(credits.PendingCharmFloors, currentFloorGuid, () => credits.Charms++, "Charm", credits) |
-                           ConvertChoiceSet(credits.PendingTabletFloors, currentFloorGuid, () => credits.Tablets++, "StoneTablet", credits);
+                           ConvertPendingTabletChoices(credits, currentFloorGuid, player);
             if (!changed) return;
             Save(credits);
             Plugin.LogInfo($"Pending choice floors converted: player={player?.PlayerAvatar?.Name}, miracles={credits.Miracles}, " +
@@ -531,8 +568,15 @@ namespace SephiriaTogether
             Credits credits = GetServerCredits(player);
             HashSet<string> pending = PendingChoiceSet(credits, type);
             string floor = player?.PlayerAvatar?.currentFloorGuid;
-            if (pending == null || string.IsNullOrEmpty(floor) || !pending.Remove(floor)) return;
-            Plugin.LogInfo($"Original {type} floor claimed: player={player.PlayerAvatar.Name}, floor={ShortGuid(floor)}.");
+            if (pending == null || string.IsNullOrEmpty(floor)) return;
+            bool claimed = pending.Remove(floor);
+            bool fusionAlternative = type == EFloorMainEventType.StoneTablet &&
+                                     credits.PendingFusionFloors.Remove(floor);
+            if (!claimed && !fusionAlternative) return;
+            if (type == EFloorMainEventType.StoneTablet)
+                credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+            Plugin.LogInfo($"Original {type} floor claimed: player={player.PlayerAvatar.Name}, floor={ShortGuid(floor)}, " +
+                           $"clearedFusionAlternative={fusionAlternative}.");
             player.SaveCurrentSessionData();
             Save(credits);
         }
@@ -550,6 +594,38 @@ namespace SephiriaTogether
             }
             return changed;
         }
+
+        private static bool ConvertPendingTabletChoices(Credits credits, string currentFloorGuid, PlayerSpawner player)
+        {
+            bool changed = false;
+            foreach (string floor in credits.PendingTabletFloors.ToArray())
+            {
+                if (floor == currentFloorGuid) continue;
+                credits.PendingTabletFloors.Remove(floor);
+                bool fusionAlternative = credits.PendingFusionFloors.Remove(floor);
+                credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+                credits.Tablets++;
+                AddHistory(credits, "Catch-up: unclaimed StoneTablet" +
+                    (fusionAlternative ? "/Fusion choice" : "") + " @ " + ShortGuid(floor));
+                if (fusionAlternative)
+                    Plugin.LogInfo($"Mutual Tablet/Fusion choice converted once: player={player?.PlayerAvatar?.Name}, " +
+                                   $"floor={ShortGuid(floor)}, grant=StoneTablet.");
+                changed = true;
+            }
+            return changed;
+        }
+
+        private static bool IsTabletFusionChoiceFloor(string floorGuid)
+        {
+            if (string.IsNullOrEmpty(floorGuid) || !FusionCompensation.IsObservedFloor(floorGuid)) return false;
+            if (DungeonManager.Instance != null &&
+                DungeonManager.Instance.generatedFloors.TryGetValue(floorGuid, out FloorData floor))
+                return floor.mainEventType == EFloorMainEventType.StoneTablet;
+            return false;
+        }
+
+        private static string TabletFusionChoiceKey(string floorGuid) =>
+            string.IsNullOrEmpty(floorGuid) ? "" : floorGuid + ":TabletOrFusionResolved";
 
         private static HashSet<string> PendingChoiceSet(Credits credits, EFloorMainEventType type)
         {
@@ -1287,19 +1363,24 @@ namespace SephiriaTogether
         private static string BuildRules()
         {
             return $"Sephiria Together {Plugin.PluginVersion}\n" +
-                   $"Game {Application.version}\n" +
-                   $"Mid-run join: {OnOff(Plugin.allowMidRunJoin.Value)}\n" +
-                   $"Lower progress: {OnOff(Plugin.allowLowerProgressPlayers.Value)}\n" +
-                   $"Ungrouped transition: {OnOff(Plugin.allowUngroupedStageTransition.Value)}\n" +
-                   $"Friendly fire: {OnOff(Plugin.friendlyFire.Value)}\n" +
-                   $"Delayed healing: {OnOff(Plugin.breathingHeal.Value)}\n" +
-                   $"Auto revive when clear: {OnOff(Plugin.autoReviveWhenClear.Value)}\n" +
-                   $"EXP catch-up: {Plugin.catchUpExperienceRatio.Value:P0}\n" +
-                   $"Enemy HP: +{Plugin.HealthPerExtraPlayerValue:P0} per player above {Plugin.BaselinePlayersValue}, cap {Plugin.MaximumMultiplierValue:0.##}x\n" +
-                   $"Enemy count: {OnOff(Plugin.scaleEnemyCount.Value)}, +{Plugin.EnemyCountPerExtraPlayerValue:P0}, cap {Plugin.MaximumEnemyCountMultiplierValue:0.##}x\n" +
-                   $"Boss/miniboss lifesteal: {OnOff(Plugin.bossLifesteal.Value)}\n" +
+                   string.Format(MenuText.Get("RuleGameVersion"), Application.version) + "\n" +
+                   string.Format(MenuText.Get("RuleMidRunJoin"), OnOff(Plugin.allowMidRunJoin.Value)) + "\n" +
+                   string.Format(MenuText.Get("RuleLowerProgress"), OnOff(Plugin.allowLowerProgressPlayers.Value)) + "\n" +
+                   string.Format(MenuText.Get("RuleUngrouped"), OnOff(Plugin.allowUngroupedStageTransition.Value)) + "\n" +
+                   string.Format(MenuText.Get("RuleFriendlyFire"), OnOff(Plugin.friendlyFire.Value)) + "\n" +
+                   string.Format(MenuText.Get("RuleHealing"), OnOff(Plugin.breathingHeal.Value)) + "\n" +
+                   string.Format(MenuText.Get("RuleAutoRevive"), OnOff(Plugin.autoReviveWhenClear.Value)) + "\n" +
+                   string.Format(MenuText.Get("RuleExpCatchup"), Plugin.catchUpExperienceRatio.Value.ToString("P0")) + "\n" +
+                   string.Format(MenuText.Get("RuleEnemyHp"), Plugin.BaselinePlayersValue,
+                       Plugin.HealthPerExtraPlayerValue.ToString("P0"), Plugin.MaximumMultiplierValue > 0f
+                           ? Plugin.MaximumMultiplierValue.ToString("0.##") + "x"
+                           : MenuText.Get("NoLimit")) + "\n" +
+                   string.Format(MenuText.Get("RuleEnemyCount"), OnOff(Plugin.scaleEnemyCount.Value),
+                       Plugin.EnemyCountPerExtraPlayerValue.ToString("P0"),
+                       Plugin.MaximumEnemyCountMultiplierValue.ToString("0.##")) + "\n" +
+                   string.Format(MenuText.Get("RuleBossLifesteal"), OnOff(Plugin.bossLifesteal.Value)) + "\n" +
                    BuildOriginalScalingSummary() + "\n" +
-                   $"Player limit: {PlayerLimit.CurrentLimit}";
+                   string.Format(MenuText.Get("RulePlayerLimit"), PlayerLimit.CurrentLimit);
         }
 
         internal static string BuildHostDiagnostics(NetworkConnectionToClient connection)
@@ -1307,14 +1388,15 @@ namespace SephiriaTogether
             PlayerSpawner player = connection?.identity != null ? connection.identity.GetComponent<PlayerSpawner>() : null;
             string floor = player?.PlayerAvatar?.currentFloorGuid ?? "-";
             string identity = !string.IsNullOrEmpty(player?.playerGuid) ? Hash(player.playerGuid) : "-";
-            return $"Protocol: {Plugin.PluginVersion}\n" +
-                   $"Game: {Application.version}\n" +
-                   $"Server active: {NetworkServer.active}\n" +
-                   $"Client active: {NetworkClient.active}\n" +
-                   $"Authenticated mod handshake: {(connection != null ? "YES" : "HOST")}\n" +
-                   $"Connection ID: {(connection != null ? connection.connectionId.ToString() : "local")}\n" +
-                   $"Player hash: {identity}\nFloor: {floor}\n" +
-                   $"Players: {(PlayerSpawner.MultiplayerList?.Count ?? 0)}\n" +
+            return string.Format(MenuText.Get("DiagnosticProtocol"), Plugin.PluginVersion) + "\n" +
+                   string.Format(MenuText.Get("RuleGameVersion"), Application.version) + "\n" +
+                   string.Format(MenuText.Get("DiagnosticServer"), OnOff(NetworkServer.active)) + "\n" +
+                   string.Format(MenuText.Get("DiagnosticClient"), OnOff(NetworkClient.active)) + "\n" +
+                   string.Format(MenuText.Get("DiagnosticHandshake"), connection != null ? OnOff(true) : MenuText.Get("Host")) + "\n" +
+                   string.Format(MenuText.Get("DiagnosticConnection"), connection != null ? connection.connectionId.ToString() : "-") + "\n" +
+                   string.Format(MenuText.Get("DiagnosticPlayer"), identity) + "\n" +
+                   string.Format(MenuText.Get("DiagnosticFloor"), FloorDisplay.Format(floor)) + "\n" +
+                   string.Format(MenuText.Get("DiagnosticPlayers"), PlayerSpawner.MultiplayerList?.Count ?? 0) + "\n" +
                    BuildOriginalScalingSummary();
         }
 
@@ -1332,13 +1414,16 @@ namespace SephiriaTogether
                 int bossHeal = KeywordDatabase.GetConstValue("hardModeBloodFestivalHealBossAndMiniboss");
                 int players = Math.Max(1, PlayerSpawner.MultiplayerList?.Count ?? 1);
                 float partyScale = players == 2 ? 0.66f : players == 3 ? 0.5f : players == 4 ? 0.33f : players >= 5 ? 0.25f : 1f;
-                return $"Vanilla HP/player: normal +{normal}%, miniboss +{miniboss}%, boss +{boss}%\n" +
-                       $"Hard mode: {hardPoints} points, Tenacious Body +{tenacious}% HP, Ferocious Claws +{ferocious}% damage\n" +
-                       $"Blood Festival: level {bloodFestival}, boss base {bossHeal}%, current original heal {bossHeal * bloodFestival * partyScale:0.##}% max HP per player hit";
+                return string.Format(MenuText.Get("VanillaHpSummary"), normal, miniboss, boss) + "\n" +
+                       string.Format(MenuText.Get("HardModeSummary"), hardPoints,
+                           HardModeName("TENACIOUSBODY"), tenacious,
+                           HardModeName("FEROCIOUSCLAWS"), ferocious) + "\n" +
+                       string.Format(MenuText.Get("BloodFestivalSummary"), HardModeName("BLOODFESTIVAL"),
+                           bloodFestival, bossHeal, (bossHeal * bloodFestival * partyScale).ToString("0.##"));
             }
             catch (Exception)
             {
-                return "Vanilla scaling data: unavailable";
+                return MenuText.Get("ScalingDataUnavailable");
             }
         }
 
@@ -1347,6 +1432,28 @@ namespace SephiriaTogether
             return DungeonManager.Instance != null && DungeonManager.Instance.hardModeEnvironment.TryGetValue(key, out int value)
                 ? value
                 : 0;
+        }
+
+        private static string HardModeName(string key)
+        {
+            try
+            {
+                HardModeShardEntity shard = HardModeDatebase.Find(key);
+                string name = shard != null ? shard.aName.ToString() : null;
+                return string.IsNullOrWhiteSpace(name) ? HardModeFallback(key) : name;
+            }
+            catch
+            {
+                return HardModeFallback(key);
+            }
+        }
+
+        private static string HardModeFallback(string key)
+        {
+            if (key == "TENACIOUSBODY") return MenuText.Get("HardModeTenacious");
+            if (key == "FEROCIOUSCLAWS") return MenuText.Get("HardModeFerocious");
+            if (key == "BLOODFESTIVAL") return MenuText.Get("HardModeBloodFestival");
+            return "-";
         }
 
         internal static string GetHostHistory()
@@ -1367,7 +1474,7 @@ namespace SephiriaTogether
         private static string ShortGuid(string value) =>
             string.IsNullOrEmpty(value) ? "-" : value.Substring(0, Math.Min(8, value.Length));
 
-        private static string OnOff(bool value) => value ? "ON" : "OFF";
+        private static string OnOff(bool value) => MenuText.Get(value ? "ToggleOn" : "ToggleOff");
 
         internal static void CaptureMiracles(MiracleController controller, MiracleMetadata[] candidates)
         {
