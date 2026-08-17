@@ -1323,12 +1323,12 @@ namespace SephiriaTogether
         private static bool TryApproachPresetChoice(PlayerAvatar player, out Vector2 movement)
         {
             movement = Vector2.zero;
+            if (WeaponPresetTerms().Length == 0) return false;
             FloorGenerator currentFloor = FloorGenerator.FindByGuid(player?.currentFloorGuid);
             bool anvilFloor = currentFloor != null
                 ? currentFloor.floorMainEventType == EFloorMainEventType.Anvil
                 : CurrentFloorEvent(player) == EFloorMainEventType.Anvil;
-            if (!anvilFloor && (player.IsInBattle || WeaponPresetTerms().Length == 0 ||
-                                CatchUpRewards.IsWeaponFullyEnhanced(player.spawner))) return false;
+            if (!anvilFloor && (player.IsInBattle || CatchUpRewards.IsWeaponFullyEnhanced(player.spawner))) return false;
             if (player.IsInBattle || CatchUpRewards.IsWeaponFullyEnhanced(player.spawner)) return false;
             if (anvilFloor && ResolvedAnvilFloors.Contains(player.currentFloorGuid)) return false;
             if (anvilFloor && loggedAnvilFloor != player.currentFloorGuid)
