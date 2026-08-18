@@ -1,6 +1,6 @@
 param(
     [string]$GameDir = $env:SEPHIRIA_DIR,
-    [string]$Version = "3.5.1"
+    [string]$Version = "3.5.2"
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,6 +16,11 @@ $bepInExArchive = Join-Path $artifacts $bepInExAsset
 $bundleStaging = Join-Path $artifacts "SephiriaTogether-$Version-with-BepInEx"
 
 & "$PSScriptRoot\build.ps1" -GameDir $GameDir -Configuration Release
+
+$builtVersion = (Get-Item -LiteralPath "$projectRoot\bin\Release\netstandard2.1\SephiriaTogether.dll").VersionInfo.FileVersion
+if (!$builtVersion.StartsWith("$Version.")) {
+    throw "Package version $Version does not match built DLL version $builtVersion."
+}
 
 if (Test-Path -LiteralPath $staging) {
     Remove-Item -LiteralPath $staging -Recurse -Force

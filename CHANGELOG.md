@@ -1,5 +1,21 @@
 # Changelog
 
+## 3.5.2
+
+- Add host-validated player-to-player Leaf transfers with an F8 recipient list, amount entry, confirmation, balance checks, atomic server updates, persistence, and sender/recipient notifications.
+- Allow authenticated clients to transfer Leaves to the host or another client without relying on catch-up handshake state or a remote-only recipient connection.
+- Add an F8 save manager for independent snapshots, vanilla backup discovery, pre-restore snapshots, atomic replacement, and immediate reload from the selected profile.
+- Expand autoplay attack preference to Left only, Prefer left, Right only, and Prefer right while keeping skills, defense, and evasion independent.
+- Add ordered Miracle presets with vanilla-localized choices, vanilla rerolls, empty-preset skipping, and leave-unclaimed behavior after rerolls are exhausted.
+- Default Miracle priority to Hunter and next-floor priority to Miracle, Anvil, Inventory Expansion, Charm, then EXP, migrating only the previous exact floor default.
+- Prioritize available personal Miracle selectors over the quest board so town compensation offers are opened and resolved before starting another commission.
+- Complete additional Grassland quest objectives and return through state- and connection-based floor routing instead of object-name-specific stairs.
+- Improve Boss trigger navigation, large-collider targeting, and warning-based laser, projectile, bomb, rectangle, ellipse, and circle evasion.
+- Read laser projectile range from its movement module instead of the prefab's unexpanded collider, preventing ranged greatswords from moving into melee range.
+- Recover from blocked spawn cells by retaining the first escape waypoint and temporarily disabling path smoothing after a no-progress check.
+- Keep local hosts and solo players out of remote missed-reward tracking, recognize both Tablet reward variants, and make autoplay resolve the vanilla Tablet altar before leaving the floor.
+- Run automatic inventory arrangement only after a genuinely idle two-second window, avoiding saves, UI, travel, rewards, and quest floors.
+
 ## 3.5.1
 
 - Extend AFK autopilot through Grassland quest-board BattleZones and automatically select the Boss node after the required quest events are cleared.

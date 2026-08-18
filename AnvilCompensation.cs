@@ -63,6 +63,7 @@ namespace SephiriaTogether
                            $"dead={player.IsDead}, event={FloorEvent(floorGuid)}.");
             if (CatchUpRewards.IsWeaponFullyEnhanced(player.spawner)) RemoveForMaxedWeapon(player.spawner);
             LockOut(player.spawner);
+            CatchUpRewards.DiscardUntrackedFloorOpportunities(player.spawner);
             CatchUpRewards.ConvertPendingAnvils(player.spawner, floorGuid);
             CatchUpRewards.ConvertPendingEnchants(player.spawner, floorGuid);
             CatchUpRewards.ConvertPendingChoiceFloors(player.spawner, floorGuid);

@@ -15,7 +15,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.5.1";
+        public const string PluginVersion = "3.5.2";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> healthPerExtraPlayer;
@@ -36,15 +36,20 @@ namespace SephiriaTogether
         internal static ConfigEntry<int> autoChoiceStrategy;
         internal static ConfigEntry<string> autoChoicePresets;
         internal static ConfigEntry<string> autoWeaponPresets;
+        internal static ConfigEntry<string> autoMiraclePresets;
         internal static ConfigEntry<string> autoFloorPresets;
         internal static ConfigEntry<bool> autoArrangeInventory;
         internal static ConfigEntry<int> autoFullInventoryStrategy;
         internal static ConfigEntry<bool> autoDefend;
+        internal static ConfigEntry<int> autoAttackMode;
         private static ConfigEntry<bool> autoFloorDefaultsInitialized;
+        private static ConfigEntry<bool> autoMiracleDefaultsInitialized;
         internal static ConfigEntry<bool> autoReviveWhenClear;
         internal static ConfigEntry<bool> bossLifesteal;
         private Harmony harmony;
-        private int lastShortcutFrame = -1;
+        private bool lastF8Held;
+        private bool lastF9Held;
+        private float nextShortcutToggle;
 
         private void Awake()
         {
@@ -87,20 +92,43 @@ namespace SephiriaTogether
                 "WeaponPresets",
                 "",
                 "Ordered weapon enhancement IDs preferred by autopilot. Configure this from the F8 menu.");
+            autoMiraclePresets = Config.Bind(
+                "Autopilot",
+                "MiraclePresets",
+                "miracle:Hunter",
+                "Ordered Miracle IDs preferred by autopilot. Empty skips Miracle choices; unmatched offers reroll while dice remain, then skip.");
+            autoMiracleDefaultsInitialized = Config.Bind(
+                "Autopilot",
+                "MiracleDefaultsInitialized",
+                false,
+                "Internal migration marker for the default Miracle priority.");
+            if (!autoMiracleDefaultsInitialized.Value)
+            {
+                if (string.IsNullOrWhiteSpace(autoMiraclePresets.Value))
+                    autoMiraclePresets.Value = "miracle:Hunter";
+                autoMiracleDefaultsInitialized.Value = true;
+                Config.Save();
+            }
             autoFloorPresets = Config.Bind(
                 "Autopilot",
                 "FloorPresets",
-                "floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP",
+                "floor:Miracle,floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP",
                 "Ordered next-floor event types preferred by autopilot. Configure this from the F8 menu.");
             autoFloorDefaultsInitialized = Config.Bind(
                 "Autopilot",
                 "FloorDefaultsInitialized",
                 false,
                 "Internal migration marker for the default next-floor priority.");
-            if (!autoFloorDefaultsInitialized.Value)
+            const string previousFloorDefault = "floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP";
+            const string currentFloorDefault = "floor:Miracle,floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP";
+            if (!autoFloorDefaultsInitialized.Value ||
+                string.Equals(autoFloorPresets.Value, previousFloorDefault, StringComparison.OrdinalIgnoreCase))
             {
                 if (string.IsNullOrWhiteSpace(autoFloorPresets.Value))
-                    autoFloorPresets.Value = "floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP";
+                    autoFloorPresets.Value = currentFloorDefault;
+                else if (string.Equals(autoFloorPresets.Value, previousFloorDefault,
+                             StringComparison.OrdinalIgnoreCase))
+                    autoFloorPresets.Value = currentFloorDefault;
                 autoFloorDefaultsInitialized.Value = true;
                 Config.Save();
             }
@@ -121,6 +149,13 @@ namespace SephiriaTogether
                 "AutoDefend",
                 true,
                 "Use supported vanilla weapon guard or parry inputs against predicted incoming attacks.");
+            autoAttackMode = Config.Bind(
+                "Autopilot",
+                "AttackMode",
+                0,
+                new ConfigDescription(
+                    "0: prefer left attack, 1: prefer right attack with left fallback, 2: left attack only, 3: right attack only.",
+                    new AcceptableValueRange<int>(0, 3)));
             autoReviveWhenClear = Config.Bind(
                 "Multiplayer",
                 "AutoReviveWhenClear",
@@ -227,7 +262,8 @@ namespace SephiriaTogether
         internal static void SetEnemyCountPerExtraPlayer(float value) => enemyCountPerExtraPlayer.Value = Mathf.Clamp(value, 0f, 1f);
         internal static void SetMaximumEnemyCountMultiplier(float value) => maximumEnemyCountMultiplier.Value = Mathf.Clamp(value, 1f, 10f);
         internal static void SaveSettings() => Instance?.Config.Save();
-        internal static void LogInfo(string message) => Instance?.Logger.LogInfo(message);
+        internal static void LogInfo(string message) =>
+            Instance?.Logger.LogInfo($"[{DateTime.Now:HH:mm:ss.fff}] {message}");
 
         internal static void ApplyPlayerLimit()
         {
@@ -259,58 +295,37 @@ namespace SephiriaTogether
 
         private void OnGUI()
         {
-            HandleGuiShortcuts();
             RescueAlerts.Draw();
             VersionReminder.Draw();
             AutoPilot.Draw();
             CoopMenu.Draw();
         }
 
-        private void HandleGuiShortcuts()
-        {
-            Event current = Event.current;
-            if (current == null || current.type != EventType.KeyDown || lastShortcutFrame == Time.frameCount)
-                return;
-            if (current.keyCode != KeyCode.F8 && current.keyCode != KeyCode.F9) return;
-            lastShortcutFrame = Time.frameCount;
-            if (current.keyCode == KeyCode.F8)
-            {
-                LogInfo($"GUI shortcut pressed: menu, open={CoopMenu.IsOpen}.");
-                CoopMenu.Toggle();
-                current.Use();
-                return;
-            }
-            if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen)
-            {
-                LogInfo("GUI shortcut pressed: autoplay.");
-                AutoPilot.Toggle();
-                current.Use();
-            }
-        }
-
         private void Update()
         {
-            bool menuPressed = menuShortcut.Value.IsDown() ||
-                               WasFallbackFunctionKeyPressed(KeyCode.F8, Keyboard.current?.f8Key);
-            bool autoPilotPressed = autoPilotShortcut.Value.IsDown() ||
-                                    WasFallbackFunctionKeyPressed(KeyCode.F9, Keyboard.current?.f9Key);
-            if (!CoopMenu.IsCapturingShortcut && menuPressed)
+            bool f8Held = Keyboard.current != null && Keyboard.current.f8Key.isPressed;
+            bool f9Held = Keyboard.current != null && Keyboard.current.f9Key.isPressed;
+            bool fallbackF8Pressed = f8Held && !lastF8Held;
+            bool fallbackF9Pressed = f9Held && !lastF9Held;
+            lastF8Held = f8Held;
+            lastF9Held = f9Held;
+            bool menuPressed = menuShortcut.Value.IsDown() || fallbackF8Pressed;
+            bool autoPilotPressed = autoPilotShortcut.Value.IsDown() || fallbackF9Pressed;
+            if (Time.unscaledTime >= nextShortcutToggle && !CoopMenu.IsCapturingShortcut && menuPressed)
             {
                 LogInfo($"Shortcut pressed: menu={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
                 CoopMenu.Toggle();
+                nextShortcutToggle = Time.unscaledTime + 0.35f;
             }
-            if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen && autoPilotPressed)
+            if (Time.unscaledTime >= nextShortcutToggle && !CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen && autoPilotPressed)
             {
                 LogInfo($"Shortcut pressed: autoplay={autoPilotShortcut.Value}.");
                 AutoPilot.Toggle();
+                nextShortcutToggle = Time.unscaledTime + 0.35f;
             }
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
-        }
-
-        private static bool WasFallbackFunctionKeyPressed(KeyCode legacyKey, KeyControl inputKey)
-        {
-            return Input.GetKeyDown(legacyKey) || inputKey != null && inputKey.wasPressedThisFrame;
+            MoneyTransfer.Tick();
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)

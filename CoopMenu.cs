@@ -42,14 +42,18 @@ namespace SephiriaTogether
         private static Vector2 scroll;
         private static Vector2 rewardDropdownScroll;
         private static Vector2 weaponDropdownScroll;
+        private static Vector2 miracleDropdownScroll;
         private static readonly List<PresetOption> RewardPresetOptions = new List<PresetOption>();
         private static readonly List<PresetOption> WeaponPresetOptions = new List<PresetOption>();
+        private static readonly List<PresetOption> MiraclePresetOptions = new List<PresetOption>();
         private static readonly List<PresetOption> FloorPresetOptions = new List<PresetOption>();
         private static int selectedRewardPreset;
         private static int selectedWeaponPreset;
+        private static int selectedMiraclePreset;
         private static int selectedFloorPreset;
         private static bool showRewardDropdown;
         private static bool showWeaponDropdown;
+        private static bool showMiracleDropdown;
         private static bool showFloorDropdown;
         private static Vector2 floorDropdownScroll;
         private static string weaponPresetStatus;
@@ -58,6 +62,10 @@ namespace SephiriaTogether
         private static int hostRulesTab;
         private static int autoPresetTab;
         private static int capturingShortcut;
+        private static string pendingSaveActivation;
+        private static string transferAmountText = "100";
+        private static uint pendingTransferTarget;
+        private static int pendingTransferAmount;
 
         internal static bool IsCapturingShortcut => capturingShortcut != 0;
         internal static bool IsOpen => open;
@@ -79,6 +87,7 @@ namespace SephiriaTogether
                 }
                 playerLimitText = PlayerLimit.CurrentLimit.ToString();
                 RefreshPresetOptions();
+                SaveManagement.Refresh();
             }
             else
             {
@@ -133,6 +142,20 @@ namespace SephiriaTogether
             GUILayout.EndHorizontal();
             DrawDivider();
             DrawTabs();
+            if (selectedTab == 5)
+            {
+                DrawSaveManagerPage();
+                GUILayout.EndVertical();
+                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
+                return;
+            }
+            if (selectedTab == 6)
+            {
+                DrawTransferPage();
+                GUILayout.EndVertical();
+                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
+                return;
+            }
             if (selectedTab == 1)
             {
                 DrawAutoPilotPage();
@@ -379,18 +402,160 @@ namespace SephiriaTogether
 
         private static void DrawTabs()
         {
-            string[] labels = { "TabRules", "TabAutoPilot", "TabCompensation", "TabDiagnostics", "TabHistory" };
-            GUILayout.BeginHorizontal();
+            string[] labels = { "TabRules", "TabAutoPilot", "TabCompensation", "TabDiagnostics", "TabHistory", "TabSaves", "TabTransfer" };
             for (int i = 0; i < labels.Length; i++)
             {
+                if (i % 3 == 0) GUILayout.BeginHorizontal();
                 if (GUILayout.Button(MenuText.Get(labels[i]), selectedTab == i ? primaryButton : button, GUILayout.Height(32f)))
                 {
                     selectedTab = i;
                     scroll = Vector2.zero;
+                    pendingTransferTarget = 0;
+                    pendingTransferAmount = 0;
                 }
+                if (i % 3 == 2) GUILayout.EndHorizontal();
             }
-            GUILayout.EndHorizontal();
+            if (labels.Length % 3 != 0) GUILayout.EndHorizontal();
             DrawDivider();
+        }
+
+        private static void DrawTransferPage()
+        {
+            CatchUpRewards.SendHello();
+            MoneyTransfer.Tick();
+            PlayerAvatar local = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
+            GUILayout.Space(4f);
+            BeginSection(MenuText.Get("LeafTransfer"));
+            GUILayout.Label(MenuText.Get("LeafTransferHelp"), muted);
+            DrawValue(MenuText.Get("TransferBalance"), (local?.Money ?? 0).ToString(), 130f);
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(MenuText.Get("TransferAmount"), body, GUILayout.Width(150f));
+            transferAmountText = GUILayout.TextField(transferAmountText ?? "", input, GUILayout.Height(30f));
+            GUILayout.EndHorizontal();
+            if (!string.IsNullOrEmpty(MoneyTransfer.Status)) GUILayout.Label(MoneyTransfer.Status, muted);
+            EndSection();
+
+            List<PlayerAvatar> recipients = PlayerSpawner.MultiplayerList?
+                .Where(spawner => spawner?.PlayerAvatar != null && spawner.PlayerAvatar != local)
+                .Select(spawner => spawner.PlayerAvatar)
+                .ToList() ?? new List<PlayerAvatar>();
+            if (recipients.Count == 0)
+                GUILayout.Label(MenuText.Get("TransferNoRecipients"), muted);
+
+            foreach (PlayerAvatar recipient in recipients)
+            {
+                GUILayout.BeginVertical(playerCard);
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(recipient.Name, section);
+                GUILayout.FlexibleSpace();
+                GUILayout.Label(MenuText.Get(recipient.IsDead ? "Dead" : "Connected"), badge,
+                    GUILayout.Width(90f), GUILayout.Height(26f));
+                GUILayout.EndHorizontal();
+                GUILayout.Label(MenuText.Get("TransferRecipientBalance") + " " + recipient.Money, muted);
+
+                bool confirming = pendingTransferTarget == recipient.netId;
+                if (!confirming)
+                {
+                    bool validAmount = int.TryParse(transferAmountText, out int amount) && amount > 0;
+                    GUI.enabled = validAmount && !MoneyTransfer.IsPending && MoneyTransfer.IsAvailable;
+                    if (GUILayout.Button(MenuText.Get("TransferSend"), primaryButton, GUILayout.Height(30f)))
+                    {
+                        pendingTransferTarget = recipient.netId;
+                        pendingTransferAmount = amount;
+                    }
+                    GUI.enabled = true;
+                }
+                else
+                {
+                    GUILayout.Label(string.Format(MenuText.Get("TransferConfirmHelp"),
+                        recipient.Name, pendingTransferAmount), muted);
+                    GUILayout.BeginHorizontal();
+                    GUI.enabled = !MoneyTransfer.IsPending;
+                    if (GUILayout.Button(MenuText.Get("TransferConfirm"), dangerButton, GUILayout.Height(28f)))
+                    {
+                        MoneyTransfer.TrySend(recipient, pendingTransferAmount);
+                        pendingTransferTarget = 0;
+                        pendingTransferAmount = 0;
+                    }
+                    GUI.enabled = true;
+                    if (GUILayout.Button(MenuText.Get("TransferCancel"), button, GUILayout.Height(28f)))
+                    {
+                        pendingTransferTarget = 0;
+                        pendingTransferAmount = 0;
+                    }
+                    GUILayout.EndHorizontal();
+                }
+                GUILayout.EndVertical();
+                GUILayout.Space(1f);
+            }
+            GUILayout.EndScrollView();
+        }
+
+        private static void DrawSaveManagerPage()
+        {
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
+            GUILayout.Space(4f);
+            BeginSection(MenuText.Get("SaveManager"));
+            GUILayout.Label(MenuText.Get("SaveManagerHelp"), muted);
+            GUILayout.Label(MenuText.Get("SaveManagerDirectory"), body);
+            GUILayout.TextField(SaveManagement.SaveDirectory, input, GUILayout.Height(28f));
+            DrawValue(MenuText.Get("SaveManagerCurrent"), SaveManagement.SelectedSlot, 110f);
+            if (!string.IsNullOrEmpty(SaveManagement.Status)) GUILayout.Label(SaveManagement.Status, muted);
+            GUILayout.BeginHorizontal();
+            GUI.enabled = !SaveManagement.IsBusy;
+            if (GUILayout.Button(MenuText.Get("SaveManagerBackupNow"), primaryButton, GUILayout.Height(30f)))
+                SaveManagement.BackupCurrent();
+            if (GUILayout.Button(MenuText.Get("SaveManagerRefresh"), button, GUILayout.Height(30f)))
+            {
+                pendingSaveActivation = null;
+                SaveManagement.Refresh();
+            }
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+            GUILayout.Space(4f);
+
+            foreach (ManagedSaveEntry entry in SaveManagement.Saves)
+            {
+                GUILayout.BeginVertical(playerCard);
+                string kind = entry.IsBackup
+                    ? entry.IsManagedBackup ? MenuText.Get("SaveManagerModBackup") : MenuText.Get("SaveManagerGameBackup")
+                    : MenuText.Get("SaveManagerActiveSave");
+                bool confirming = pendingSaveActivation == entry.Id;
+                GUILayout.BeginHorizontal();
+                GUILayout.BeginVertical();
+                GUILayout.Label($"{entry.Slot} · {kind}", section);
+                GUILayout.Label(entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss") + " · " +
+                                (entry.CanResumeDungeon ? MenuText.Get("SaveManagerWithRun") : MenuText.Get("SaveManagerMainOnly")),
+                    muted);
+                GUILayout.EndVertical();
+                GUI.enabled = !SaveManagement.IsBusy;
+                if (!confirming)
+                {
+                    if (GUILayout.Button(MenuText.Get("SaveManagerUse"), button,
+                            GUILayout.Width(104f), GUILayout.Height(30f)))
+                        pendingSaveActivation = entry.Id;
+                }
+                GUILayout.EndHorizontal();
+                if (confirming)
+                {
+                    GUILayout.Label(MenuText.Get("SaveManagerConfirmHelp"), muted);
+                    GUILayout.BeginHorizontal();
+                    if (GUILayout.Button(MenuText.Get("SaveManagerConfirmUse"), dangerButton, GUILayout.Height(28f)))
+                    {
+                        pendingSaveActivation = null;
+                        SaveManagement.Activate(entry);
+                    }
+                    if (GUILayout.Button(MenuText.Get("SaveManagerCancel"), button, GUILayout.Height(28f)))
+                        pendingSaveActivation = null;
+                    GUILayout.EndHorizontal();
+                }
+                GUI.enabled = true;
+                GUILayout.EndVertical();
+                GUILayout.Space(1f);
+            }
+            EndSection();
+            GUILayout.EndScrollView();
         }
 
         private static void DrawHostRuleTabs()
@@ -509,7 +674,7 @@ namespace SephiriaTogether
             GUILayout.Label(MenuText.Get("FullInventoryHelp"), muted);
             GUILayout.Space(8f);
             GUILayout.BeginHorizontal();
-            string[] tabs = { "RewardPresetTab", "WeaponPresetTab", "FloorPresetTab" };
+            string[] tabs = { "RewardPresetTab", "WeaponPresetTab", "MiraclePresetTab", "FloorPresetTab" };
             for (int i = 0; i < tabs.Length; i++)
             {
                 bool disabled = i == 0 && Plugin.autoChoiceStrategy.Value != 0;
@@ -520,6 +685,7 @@ namespace SephiriaTogether
                     autoPresetTab = i;
                     showRewardDropdown = false;
                     showWeaponDropdown = false;
+                    showMiracleDropdown = false;
                     showFloorDropdown = false;
                 }
                 GUI.enabled = true;
@@ -538,6 +704,10 @@ namespace SephiriaTogether
                     WeaponPresetOptions, Plugin.autoWeaponPresets, ref selectedWeaponPreset,
                     ref showWeaponDropdown, ref weaponDropdownScroll);
             }
+            else if (autoPresetTab == 2)
+                DrawPresetPicker(MenuText.Get("MiraclePresets"), MenuText.Get("MiraclePresetsHelp"),
+                    MiraclePresetOptions, Plugin.autoMiraclePresets, ref selectedMiraclePreset,
+                    ref showMiracleDropdown, ref miracleDropdownScroll);
             else
                 DrawPresetPicker(MenuText.Get("FloorPresets"), MenuText.Get("FloorPresetsHelp"),
                     FloorPresetOptions, Plugin.autoFloorPresets, ref selectedFloorPreset,
@@ -564,6 +734,27 @@ namespace SephiriaTogether
             if (GUILayout.Button(MenuText.Get(AutoPilot.Enabled ? "DisableAutoPilot" : "EnableAutoPilot"),
                     AutoPilot.Enabled ? dangerButton : primaryButton, GUILayout.Height(34f)))
                 AutoPilot.Toggle();
+            GUILayout.Space(6f);
+            GUILayout.Label(MenuText.Get("AutoAttackMode"), body);
+            string[] attackModes = { "AutoAttackLeftOnly", "AutoAttackPrimary", "AutoAttackRightOnly", "AutoAttackSecondary" };
+            int[] attackModeValues = { 2, 0, 3, 1 };
+            for (int row = 0; row < 2; row++)
+            {
+                GUILayout.BeginHorizontal();
+                for (int column = 0; column < 2; column++)
+                {
+                    int index = row * 2 + column;
+                    if (GUILayout.Button(MenuText.Get(attackModes[index]),
+                            Plugin.autoAttackMode.Value == attackModeValues[index] ? primaryButton : button,
+                            GUILayout.Height(30f)))
+                    {
+                        Plugin.autoAttackMode.Value = attackModeValues[index];
+                        Plugin.SaveSettings();
+                    }
+                }
+                GUILayout.EndHorizontal();
+            }
+            GUILayout.Label(MenuText.Get("AutoAttackModeHelp"), muted);
             DrawToggle(MenuText.Get("AutoArrangeInventory"), Plugin.autoArrangeInventory);
             GUILayout.Label(MenuText.Get("AutoArrangeInventoryHelp"), muted);
             DrawToggle(MenuText.Get("AutoDefend"), Plugin.autoDefend);
@@ -640,6 +831,7 @@ namespace SephiriaTogether
         {
             RewardPresetOptions.Clear();
             WeaponPresetOptions.Clear();
+            MiraclePresetOptions.Clear();
             FloorPresetOptions.Clear();
             weaponPresetStatus = null;
             try
@@ -687,6 +879,25 @@ namespace SephiriaTogether
                 }
                 WeaponPresetOptions.Sort((left, right) => string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
 
+                IEnumerable<Miracle> miracles;
+                try
+                {
+                    miracles = MiracleDatabase.GetAll() ?? Enumerable.Empty<Miracle>();
+                }
+                catch
+                {
+                    miracles = Enumerable.Empty<Miracle>();
+                }
+                foreach (Miracle miracle in miracles
+                             .Where(candidate => candidate != null && candidate.isEnabled &&
+                                                 candidate.tier == Miracle.ETier.Tier1 &&
+                                                 IsValidDisplayName(candidate.Name, candidate.aName.key))
+                             .OrderBy(candidate => candidate.Name))
+                    MiraclePresetOptions.Add(new PresetOption("miracle:" + miracle.id, miracle.Name,
+                        miracle.id, miracle.Name, miracle.aName.key));
+                MiraclePresetOptions.Sort((left, right) =>
+                    string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
+
                 foreach (EFloorMainEventType eventType in Enum.GetValues(typeof(EFloorMainEventType)))
                 {
                     if (eventType == EFloorMainEventType.None || eventType == EFloorMainEventType.Unknown ||
@@ -699,6 +910,8 @@ namespace SephiriaTogether
                 RemoveInvalidStablePresets(Plugin.autoChoicePresets, RewardPresetOptions, "item:", "category:");
                 if (currentWeapon != null)
                     RemoveInvalidStablePresets(Plugin.autoWeaponPresets, WeaponPresetOptions, "weapon:");
+                if (MiraclePresetOptions.Count > 0)
+                    RemoveInvalidStablePresets(Plugin.autoMiraclePresets, MiraclePresetOptions, "miracle:");
                 RemoveInvalidStablePresets(Plugin.autoFloorPresets, FloorPresetOptions, "floor:");
             }
             catch (Exception exception)

@@ -134,6 +134,7 @@ namespace SephiriaTogether
             MidRunJoin.RegisterServerMessages();
             RescueAlerts.RegisterServerMessages();
             AutoPilot.RegisterServerMessages();
+            MoneyTransfer.RegisterServerMessages();
         }
 
         internal static void RegisterClientMessages()
@@ -142,6 +143,7 @@ namespace SephiriaTogether
             NetworkClient.RegisterHandler<CatchUpOfferMessage>(OnClientOffer, true);
             RescueAlerts.RegisterClientMessages();
             AutoPilot.RegisterClientMessages();
+            MoneyTransfer.RegisterClientMessages();
         }
 
         private static void ConfigureSerialization()
@@ -328,6 +330,33 @@ namespace SephiriaTogether
             FusionCompensation.ScheduleSpawn(newcomer);
         }
 
+        internal static bool ShouldTrackUnclaimedFloor(PlayerSpawner player)
+        {
+            if (!NetworkServer.active || player?.PlayerAvatar == null || player.connectionToClient == null) return false;
+            return !player.isHost && player.connectionToClient != NetworkServer.localConnection;
+        }
+
+        internal static void DiscardUntrackedFloorOpportunities(PlayerSpawner player)
+        {
+            if (!NetworkServer.active || player == null ||
+                !player.isHost && player.connectionToClient != NetworkServer.localConnection) return;
+            Credits credits = GetServerCredits(player);
+            int removed = credits.PendingAnvilFloors.Count + credits.PendingEnchantFloors.Count +
+                          credits.PendingMiracleFloors.Count + credits.PendingCharmFloors.Count +
+                          credits.PendingTabletFloors.Count + credits.PendingFusionFloors.Count;
+            if (removed == 0) return;
+            credits.PendingAnvilFloors.Clear();
+            credits.PendingEnchantFloors.Clear();
+            credits.PendingMiracleFloors.Clear();
+            credits.PendingCharmFloors.Clear();
+            credits.PendingTabletFloors.Clear();
+            credits.PendingFusionFloors.Clear();
+            AddHistory(credits, $"Discarded {removed} local/host reward-floor marker(s)");
+            Plugin.LogInfo($"Discarded ineligible local reward-floor markers: player={player?.PlayerAvatar?.Name}, " +
+                           $"count={removed}, host={player?.isHost}, party={PlayerSpawner.MultiplayerList?.Count ?? 0}.");
+            Save(credits);
+        }
+
         private static void RemoveCurrentFloorFromCatchUp(PlayerSpawner player, Credits credits)
         {
             string guid = player?.PlayerAvatar?.currentFloorGuid;
@@ -357,6 +386,7 @@ namespace SephiriaTogether
 
         internal static void RecordPendingFusion(PlayerSpawner player, string floorGuid)
         {
+            if (!ShouldTrackUnclaimedFloor(player)) return;
             Credits credits = GetServerCredits(player);
             if (credits.CountedFloors.Contains(TabletFusionChoiceKey(floorGuid))) return;
             if (string.IsNullOrEmpty(floorGuid) || !credits.PendingFusionFloors.Add(floorGuid)) return;
@@ -460,6 +490,7 @@ namespace SephiriaTogether
 
         internal static void RecordPendingAnvil(PlayerSpawner player, string floorGuid)
         {
+            if (!ShouldTrackUnclaimedFloor(player)) return;
             Credits credits = GetServerCredits(player);
             if (ClearWeaponCreditsIfMaxed(player, credits)) return;
             if (!string.IsNullOrEmpty(floorGuid) && credits.PendingAnvilFloors.Add(floorGuid))
@@ -505,6 +536,7 @@ namespace SephiriaTogether
 
         internal static void RecordPendingEnchant(PlayerSpawner player, string floorGuid)
         {
+            if (!ShouldTrackUnclaimedFloor(player)) return;
             Credits credits = GetServerCredits(player);
             if (!string.IsNullOrEmpty(floorGuid) && credits.PendingEnchantFloors.Add(floorGuid))
             {
@@ -544,6 +576,7 @@ namespace SephiriaTogether
 
         internal static void RecordPendingChoiceFloor(PlayerSpawner player, string floorGuid, EFloorMainEventType type)
         {
+            if (!ShouldTrackUnclaimedFloor(player)) return;
             Credits credits = GetServerCredits(player);
             if (type == EFloorMainEventType.StoneTablet &&
                 credits.CountedFloors.Contains(TabletFusionChoiceKey(floorGuid))) return;
@@ -843,6 +876,7 @@ namespace SephiriaTogether
         {
             if (connection != null)
             {
+                MoneyTransfer.RemoveConnection(connection);
                 AnvilCompensation.RemoveConnection(connection);
                 ChoiceRewardObjects.RemoveConnection(connection);
                 bool hasPersonalFusion = connection.owned.Any(identity =>
@@ -885,6 +919,7 @@ namespace SephiriaTogether
         internal static void ClearClientState()
         {
             RescueAlerts.ClearClient();
+            MoneyTransfer.ClearClient();
             VersionReminder.Clear();
             clientHelloSent = false;
             clientClaimPending = false;
@@ -912,6 +947,7 @@ namespace SephiriaTogether
         internal static void ClearServerState()
         {
             RescueAlerts.ClearServer();
+            MoneyTransfer.ClearServer();
             ServerCredits.Clear();
             PendingSephirites.Clear();
             BossRewardSessions.Clear();
@@ -1215,6 +1251,8 @@ namespace SephiriaTogether
                 RewardType = rewardType,
                 Group = group
             };
+            Plugin.LogInfo($"Catch-up Sephirite spawned: player={player.Name}, prefab={prefabName}, " +
+                           $"rewardType={rewardType}, netId={sephirite.netId}, floor={ShortGuid(player.currentFloorGuid)}.");
             return true;
         }
 
@@ -1225,7 +1263,8 @@ namespace SephiriaTogether
             {
                 if (sephirite.type == Sephirite.Type.CHARM)
                     MarkCurrentChoiceClaimed(player?.spawner, EFloorMainEventType.Charm);
-                else if (sephirite.type == Sephirite.Type.TABLET)
+                else if (sephirite.type == Sephirite.Type.TABLET ||
+                         sephirite.type == Sephirite.Type.TABLET_BOSS)
                     MarkCurrentChoiceClaimed(player?.spawner, EFloorMainEventType.StoneTablet);
                 return;
             }
@@ -1320,6 +1359,7 @@ namespace SephiriaTogether
             PlayerAvatar avatar = player?.PlayerAvatar;
             HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
             return NetworkServer.active && avatar != null && player.connectionToClient != null && !avatar.IsDead &&
+                   !player.isHost && player.connectionToClient != NetworkServer.localConnection &&
                    avatar.isInDungeon > 0 && !string.IsNullOrEmpty(avatar.currentFloorGuid) &&
                    FloorGenerator.FindByGuid(avatar.currentFloorGuid) != null &&
                    (DungeonManager.Instance == null || !DungeonManager.Instance.isGiveUpRun) &&
@@ -1522,7 +1562,7 @@ namespace SephiriaTogether
             FloorGenerator floor = spawner.GetComponentInParent<FloorGenerator>();
             BossRewardSession session = new BossRewardSession { FloorGuid = floor != null ? floor.guid : "" };
             foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList)
-                if (player != null && !string.IsNullOrEmpty(player.playerGuid))
+                if (ShouldTrackUnclaimedFloor(player) && !string.IsNullOrEmpty(player.playerGuid))
                     session.PlayerSlots[player.playerGuid] = player.currentPlayerIdxForSave;
             BossRewardSessions[spawner.netId] = session;
             Plugin.LogInfo($"Boss reward session tracked: floor={ShortGuid(session.FloorGuid)}, players={session.PlayerSlots.Count}.");

@@ -27,6 +27,10 @@ namespace SephiriaTogether
         private static int pendingWeaponSpecialId;
         private static int lastLoggedWeaponId;
         private static float nextWeaponProfileLog;
+        private static int primaryProfileWeaponId;
+        private static int primaryProfileWeaponRange;
+        private static float nextPrimaryProfileRefresh;
+        private static PrimaryAttackProfile cachedPrimaryProfile;
         private static float nextDash;
         private static float releaseCombatAbilityAt;
         private static int heldCombatAbility = -1;
@@ -46,6 +50,18 @@ namespace SephiriaTogether
         private static readonly Dictionary<uint, int> AnvilRerollCounts = new Dictionary<uint, int>();
         private static float nextAnvilDecision;
         private static string loggedAnvilFloor;
+        private static readonly HashSet<uint> SkippedMiracles = new HashSet<uint>();
+        private static readonly HashSet<string> ResolvedMiracleFloors = new HashSet<string>();
+        private static readonly Dictionary<uint, int> MiracleRerollCounts = new Dictionary<uint, int>();
+        private static UI_MiraclePanel activeMiraclePanel;
+        private static MiracleSelector2 activeMiracleSelector;
+        private static MiracleController activeMiracleController;
+        private static MiracleMetadata[] activeMiracleOffer = new MiracleMetadata[0];
+        private static bool miracleRerollPending;
+        private static float nextMiracleDecision;
+        private static string pendingMiracleResolveFloor;
+        private static float pendingMiracleResolveAt;
+        private static float nextMiracleDiagnostic;
         private static readonly HashSet<int> IgnoredDroppedItems = new HashSet<int>();
         private static string ignoredDropFloor;
         private static float nextDefenseScan;
@@ -60,9 +76,11 @@ namespace SephiriaTogether
         private static float nextWorldObjectScan;
         private static string worldObjectFloor;
         private static Anvil cachedAnvil;
+        private static MiracleSelector2 cachedMiracleSelector;
         private static BossSpawner cachedBossSpawner;
         private static Interactable cachedEntrance;
         private static Interactable cachedQuestBoard;
+        private static SeedBossSpawner cachedSeedBossSpawner;
         private static float nextQuestBoardAction;
         private static string questObjectScanFloor;
         private static float nextQuestObjectScan;
@@ -70,6 +88,9 @@ namespace SephiriaTogether
         private static List<EnemySpawner> cachedQuestSpawners = new List<EnemySpawner>();
         private static List<EnemySpawnerInteractableTrigger> cachedQuestTriggers =
             new List<EnemySpawnerInteractableTrigger>();
+        private static List<QuestBoardProp_GatherResources> cachedQuestResources =
+            new List<QuestBoardProp_GatherResources>();
+        private static List<QuestBoardProp_Jail> cachedQuestJails = new List<QuestBoardProp_Jail>();
         private static uint lastLoggedQuestObjectiveNetId;
         private static float nextQuestObjectiveLog;
         private static float nextInventorySignatureCheck;
@@ -99,6 +120,15 @@ namespace SephiriaTogether
         private static Vector2 defenseEvasionMovement;
         private static Sephirite cachedReward;
         private static float nextRewardScan;
+        private static string rewardOpportunityFloor;
+        private static float rewardOpportunityWaitUntil;
+        private static float nextRewardOpportunityScan;
+        private static BossRewardBubble cachedBossRewardBubble;
+        private static AltarOfTabletInteractable cachedTabletChoice;
+        private static AltarOfTablet cachedTabletAltar;
+        private static Component cachedUtilityReward;
+        private static Interactable cachedUtilityRewardInteractable;
+        private static EXPOrb cachedExpOrb;
         private static PlayerAvatar rescueTarget;
         private static RevivePlayerByInteraction rescueInteraction;
         private static float rescueCompleteAt;
@@ -120,9 +150,18 @@ namespace SephiriaTogether
         private static Vector3 dynamiteEscapeDestination;
         private static float nextDynamiteSearch;
         private static float nextDynamiteDiagnostic;
+        private static Vector2 committedEvasionMovement;
+        private static float committedEvasionUntil;
+        private static Vector3 specialBossDangerCenter;
+        private static float specialBossDangerRadius;
+        private static float specialBossDangerUntil;
+        private static Vector3 specialBossEscapeDestination;
         private static Vector3 bossTriggerDestination;
         private static string bossTriggerFloor;
+        private static int bossTriggerSpawnerId;
         private static float nextBossTriggerSearch;
+        private static float nextBossTriggerInteraction;
+        private static float nextBossSpawnerDiagnostic;
         private static int waitingBossSpawnerId;
         private static float waitingBossSince;
         private static readonly HashSet<int> CompletedBossSpawners = new HashSet<int>();
@@ -133,11 +172,17 @@ namespace SephiriaTogether
         private static Vector3 lastPathPosition;
         private static float nextPathCalculation;
         private static float nextStuckCheck;
+        private static bool pathStartsFromBlockedCell;
+        private static float pathSmoothingSuppressedUntil;
         private static string lastDiagnosticState;
         private static float nextDiagnosticHeartbeat;
+        private static float nextDiagnosticChangeLog;
         private static string lastPathDiagnostic;
         private static float nextPathDiagnostic;
         private static float nextStateSync;
+        private static string pendingFloorMoveFrom;
+        private static string pendingFloorMoveTo;
+        private static float pendingFloorMoveUntil;
         private static readonly HashSet<uint> EnabledPlayers = new HashSet<uint>();
 
         internal static bool Enabled => enabled;
@@ -157,7 +202,7 @@ namespace SephiriaTogether
             internal float ActiveUntil;
         }
 
-        private enum AoeShape { Circle, Segment, Box }
+        private enum AoeShape { Circle, Ellipse, Segment, Box }
 
         private enum PrimaryInputMode { Hold, ChargeRelease }
 
@@ -172,6 +217,16 @@ namespace SephiriaTogether
             internal bool IsRanged;
         }
 
+        private struct PrimaryAttackProfile
+        {
+            internal bool HasMeleeCollision;
+            internal bool HasProjectile;
+            internal bool HasMeasuredProjectileReach;
+            internal float ReliableMeleeReach;
+            internal float ReliableProjectileReach;
+            internal string Description;
+        }
+
         internal static void Toggle()
         {
             SetEnabled(!enabled);
@@ -181,6 +236,7 @@ namespace SephiriaTogether
         {
             if (enabled == value) return;
             enabled = value;
+            ResetInventoryArrangeTracking(resetLastSignature: true, resetCooldown: true);
             if (!enabled) StopLocalPlayer();
             else
             {
@@ -210,12 +266,19 @@ namespace SephiriaTogether
                 ReleaseCombatAbility(player, force: true);
                 return;
             }
+            if (!AllowsPrimaryAttack()) ReleaseAttack(player);
+            if (!AllowsSecondaryAttack() && heldCombatAbility == 101 && !defenseHeld)
+                ReleaseCombatAbility(player, force: true);
             if (UIManager.Instance != null && UIManager.Instance.CurrentControlStack != null)
             {
+                pendingInventorySignature = null;
+                arrangeInventoryAt = 0f;
+                nextInventorySignatureCheck = 0f;
                 if (TrySelectQuestBoardEvent(player)) return;
                 UpdateRunning(player, false);
                 ReportBlockedDiagnostics(player, "ui-open");
                 CancelRescue(player);
+                TrySelectPresetMiracle(player);
                 TrySelectPresetWeapon(player);
                 ApplyMovement(player, Vector2.zero);
                 ReleaseAttack(player);
@@ -229,10 +292,27 @@ namespace SephiriaTogether
             PlayerAvatar leader = FollowTarget(player);
             Vector2 movement = Vector2.zero;
             string action = "idle";
-            bool evadingAoe = TryEvadeGroundDynamite(player, out movement) ||
+            bool evadingAoe = TryEvadeSpecialBossDanger(player, out movement) ||
+                              TryEvadeGroundDynamite(player, out movement) ||
                               TryEvadeActiveLaser(player, out movement) ||
                               TryEvadeProjectile(player, out movement) ||
                               TryEvadeAoe(player, enemy, out movement);
+            if (evadingAoe && movement.sqrMagnitude > 0.01f)
+            {
+                committedEvasionMovement = movement.normalized;
+                committedEvasionUntil = Time.unscaledTime + 0.4f;
+            }
+            else if (!evadingAoe && Time.unscaledTime < committedEvasionUntil &&
+                     committedEvasionMovement.sqrMagnitude > 0.01f)
+            {
+                movement = committedEvasionMovement;
+                evadingAoe = true;
+            }
+            else if (!evadingAoe)
+            {
+                committedEvasionMovement = Vector2.zero;
+                committedEvasionUntil = 0f;
+            }
             bool rescuing = !evadingAoe && TryRescueTeammate(player, enemy, out movement);
             bool defending = !evadingAoe && !rescuing && TryAutoDefend(player, enemy);
             if (evadingAoe)
@@ -240,23 +320,8 @@ namespace SephiriaTogether
                 action = "aoe-evade";
                 CancelRescue(player);
                 ReleaseDefense(player);
-                if (enemy != null)
-                {
-                    WeaponTactics tactics = AdjustTacticsForEnemy(GetWeaponTactics(player), enemy);
-                    bool clearShot = HasClearLineOfFire(player.transform.position, enemy.transform.position);
-                    if (tactics.IsRanged && clearShot)
-                    {
-                        ReportAttackDecision(player, enemy, tactics, "evade-fire", clearShot);
-                        Attack(player, (enemy.transform.position - player.transform.position).normalized, tactics);
-                    }
-                    else
-                    {
-                        ReportAttackDecision(player, enemy, tactics,
-                            tactics.IsRanged ? "evade-blocked-shot" : "evade-melee", clearShot);
-                        ReleaseAttack(player);
-                    }
-                }
-                else ReleaseAttack(player);
+                ReleaseAttack(player);
+                ReleaseCombatAbility(player, force: true);
             }
             else if (rescuing)
             {
@@ -269,7 +334,12 @@ namespace SephiriaTogether
                 Vector2 toEnemy = enemy.transform.position - player.transform.position;
                 player.autoAimedTarget = enemy;
                 SetAutoPilotAim(enemy.transform.position, enemy);
-                WeaponTactics tactics = AdjustTacticsForEnemy(GetWeaponTactics(player), enemy);
+                bool secondaryOnly = IsSecondaryOnlyMode();
+                bool primaryAllowed = AllowsPrimaryAttack();
+                bool secondaryReady = ShouldUsePreferredSecondary(player);
+                WeaponTactics primaryTactics = AdjustTacticsForEnemy(GetWeaponTactics(player), enemy);
+                WeaponTactics tactics = AdjustTacticsForEnemy(
+                    secondaryOnly || secondaryReady ? GetSecondaryTactics(player) : GetWeaponTactics(player), enemy);
                 if (!defending) movement = GetCombatMovement(player, enemy, tactics);
                 bool blockedShot = tactics.IsRanged && !HasClearLineOfFire(player.transform.position,
                     enemy.transform.position);
@@ -284,9 +354,23 @@ namespace SephiriaTogether
                 }
                 else
                 {
-                    bool abilityUsed = TryUseCombatAbility(player, enemy, toEnemy, tactics);
-                    ReportAttackDecision(player, enemy, tactics, abilityUsed ? "ability-used" : "primary", !blockedShot);
-                    if (!abilityUsed) Attack(player, toEnemy.normalized, tactics);
+                    bool secondaryInRange = secondaryReady && IsWithinAttackRange(player, enemy, tactics);
+                    bool primaryInRange = primaryAllowed && IsWithinAttackRange(player, enemy, primaryTactics);
+                    bool abilityUsed = secondaryInRange
+                        ? TryUsePreferredSecondary(player, enemy, toEnemy, tactics)
+                        : (!secondaryReady && (primaryInRange || secondaryOnly &&
+                                              IsWithinAttackRange(player, enemy, tactics)))
+                            ? TryUseCombatAbility(player, enemy, toEnemy, tactics, AllowsSecondaryAttack())
+                            : false;
+                    string attackReason = abilityUsed ? "ability-used" : secondaryOnly
+                        ? secondaryReady ? "approach-secondary-range" : "secondary-unavailable"
+                        : !primaryInRange ? "approach-range"
+                        : secondaryReady && !secondaryInRange ? "primary-fallback-range" : "primary";
+                    ReportAttackDecision(player, enemy, tactics,
+                        attackReason, !blockedShot);
+                    if (!primaryInRange || secondaryOnly) ReleaseAttack(player);
+                    else if (!abilityUsed)
+                        Attack(player, toEnemy, primaryTactics);
                 }
             }
             else
@@ -296,6 +380,21 @@ namespace SephiriaTogether
                 {
                     action = "defend-projectile";
                     movement = Vector2.zero;
+                }
+                else if (TryApproachBossTrigger(player, out Vector2 bossMovement))
+                {
+                    action = "boss-trigger";
+                    movement = bossMovement;
+                }
+                else if (TryHandleFloorReward(player, out Vector2 rewardMovement))
+                {
+                    action = "reward";
+                    movement = rewardMovement;
+                }
+                else if (TryApproachPresetMiracle(player, out Vector2 miracleMovement))
+                {
+                    action = "miracle";
+                    movement = miracleMovement;
                 }
                 else if (TryApproachQuestBoard(player, out Vector2 questBoardMovement))
                 {
@@ -316,11 +415,6 @@ namespace SephiriaTogether
                 {
                     action = "entrance";
                     movement = entranceMovement;
-                }
-                else if (TryApproachBossTrigger(player, out Vector2 bossMovement))
-                {
-                    action = "boss-trigger";
-                    movement = bossMovement;
                 }
                 else if (leader != null)
                 {
@@ -343,9 +437,8 @@ namespace SephiriaTogether
             {
                 nextUtilityCheck = Time.unscaledTime + 0.35f;
                 TryPickUpNearbyItem(player);
-                TryClaimFavoriteReward(player);
             }
-            TryAutoArrangeInventory(player, enemy);
+            TryAutoArrangeInventory(player, enemy, action, movement);
             SendState(force: false);
         }
 
@@ -382,13 +475,19 @@ namespace SephiriaTogether
             pendingWeaponSpecialId = 0;
             lastLoggedWeaponId = 0;
             nextWeaponProfileLog = 0f;
+            primaryProfileWeaponId = 0;
+            primaryProfileWeaponRange = 0;
+            nextPrimaryProfileRefresh = 0f;
+            cachedPrimaryProfile = default;
             nextDash = 0f;
             releaseCombatAbilityAt = 0f;
             heldCombatAbility = -1;
             nextQuickSlot = 0;
             lastInventorySignature = null;
             pendingInventorySignature = null;
+            nextInventorySignatureCheck = 0f;
             arrangeInventoryAt = 0f;
+            nextInventoryArrangeAllowed = 0f;
             nextRewardAction = 0f;
             attackHeld = false;
             attackHeldSince = 0f;
@@ -399,6 +498,12 @@ namespace SephiriaTogether
             LoggedAnvilWaitFloors.Clear();
             AnvilRerollCounts.Clear();
             nextAnvilDecision = 0f;
+            SkippedMiracles.Clear();
+            ResolvedMiracleFloors.Clear();
+            MiracleRerollCounts.Clear();
+            ClearActiveMiracleOffer();
+            nextMiracleDecision = 0f;
+            nextMiracleDiagnostic = 0f;
             IgnoredDroppedItems.Clear();
             ignoredDropFloor = null;
             nextDefenseScan = 0f;
@@ -436,6 +541,15 @@ namespace SephiriaTogether
             defenseEvasionMovement = Vector2.zero;
             cachedReward = null;
             nextRewardScan = 0f;
+            rewardOpportunityFloor = null;
+            rewardOpportunityWaitUntil = 0f;
+            nextRewardOpportunityScan = 0f;
+            cachedBossRewardBubble = null;
+            cachedTabletChoice = null;
+            cachedTabletAltar = null;
+            cachedUtilityReward = null;
+            cachedUtilityRewardInteractable = null;
+            cachedExpOrb = null;
             cachedQuestBoard = null;
             nextQuestBoardAction = 0f;
             CancelRescue(LocalPlayer());
@@ -456,16 +570,29 @@ namespace SephiriaTogether
             dynamiteEscapeDestination = Vector3.zero;
             nextDynamiteSearch = 0f;
             nextDynamiteDiagnostic = 0f;
+            committedEvasionMovement = Vector2.zero;
+            committedEvasionUntil = 0f;
+            specialBossDangerCenter = Vector3.zero;
+            specialBossDangerRadius = 0f;
+            specialBossDangerUntil = 0f;
+            specialBossEscapeDestination = Vector3.zero;
             bossTriggerDestination = Vector3.zero;
             bossTriggerFloor = null;
+            bossTriggerSpawnerId = 0;
             nextBossTriggerSearch = 0f;
+            nextBossTriggerInteraction = 0f;
+            nextBossSpawnerDiagnostic = 0f;
             ResetWorldObjectCache();
             ResetPath();
             lastDiagnosticState = null;
             nextDiagnosticHeartbeat = 0f;
+            nextDiagnosticChangeLog = 0f;
             lastPathDiagnostic = null;
             nextPathDiagnostic = 0f;
             nextStateSync = 0f;
+            pendingFloorMoveFrom = null;
+            pendingFloorMoveTo = null;
+            pendingFloorMoveUntil = 0f;
         }
 
         internal static void RegisterBullet(Bullet bullet)
@@ -505,6 +632,77 @@ namespace SephiriaTogether
                 WarningTime = Mathf.Max(0.1f, warningTime),
                 ActiveUntil = Time.unscaledTime + Mathf.Max(1.25f, warningTime + 0.75f)
             });
+        }
+
+        internal static void RegisterHostileEllipse(UI_AOEWarning warning, Vector3 center, float radius,
+            float warningTime, Color color)
+        {
+            RegisterHostileEllipse(warning, center,
+                new Vector2(radius + 0.65f, radius * 0.5f + 0.65f), warningTime, color);
+        }
+
+        private static void RegisterHostileEllipse(UI_AOEWarning warning, Vector3 center, Vector2 radius,
+            float warningTime, Color color)
+        {
+            if (warning == null || radius.x <= 0f || radius.y <= 0f || !ApproximatelyHostileColor(color)) return;
+            ActiveAoeThreats.RemoveAll(threat => threat.Warning == null || threat.Warning == warning);
+            ActiveAoeThreats.Add(new AoeThreat
+            {
+                Warning = warning,
+                Shape = AoeShape.Ellipse,
+                Center = center,
+                Size = radius,
+                CreatedAt = Time.unscaledTime,
+                WarningTime = Mathf.Max(0.1f, warningTime),
+                ActiveUntil = Time.unscaledTime + Mathf.Max(1.25f, warningTime + 0.75f)
+            });
+        }
+
+        internal static void RegisterRootDemonCloseWarning(Unit_RootDemonPart part)
+        {
+            if (part == null) return;
+            UI_AOEWarning_Ellipse warning = Traverse.Create(part)
+                .Field("tooCloserToTargetWarning").GetValue<UI_AOEWarning_Ellipse>();
+            if (warning == null) return;
+            Vector2 radius = new Vector2(part.tooCloserToTargetAttackRadius + 0.65f,
+                part.tooCloserToTargetAttackRadius * part.tooCloserToTargetAttackRadius_yScale + 0.65f);
+            RegisterHostileEllipse(warning, part.transform.position, radius,
+                Mathf.Max(0.1f, part.tooCloserToTargetAttackDelayTimer.time - 0.5f),
+                AOEWarningFactory.HostileWarningColor);
+        }
+
+        internal static void RegisterMoleBigBombPunch(Unit_MoleBigBomb boss, Vector2 target, bool opposite)
+        {
+            if (boss == null) return;
+            Vector2 direction = target - (Vector2)boss.transform.position;
+            if (direction.sqrMagnitude < 0.01f) direction = Vector2.right;
+            direction.Normalize();
+            RegisterMoleBigBombPunchDirection(boss, direction, opposite);
+        }
+
+        private static void RegisterMoleBigBombPunchDirection(Unit_MoleBigBomb boss, Vector2 direction, bool opposite)
+        {
+            List<UI_AOEWarning_BigBombArc> warnings = Traverse.Create(boss)
+                .Field("bombPunchAttackWarningObject").GetValue<List<UI_AOEWarning_BigBombArc>>();
+            UI_AOEWarning_BigBombArc warning = warnings?
+                .Where(candidate => candidate != null && candidate.IsSpawned)
+                .OrderBy(candidate => Mathf.Abs(Mathf.DeltaAngle(candidate.transform.eulerAngles.z,
+                    direction.GetAngle())))
+                .FirstOrDefault();
+            if (warning == null) return;
+            Vector3 center = opposite ? boss.transform.position :
+                boss.transform.position + (Vector3)(direction * 3.25f);
+            Vector2 size = opposite ? new Vector2(7f, 13f) : new Vector2(7f, 6.5f);
+            RegisterHostileBox(warning, center, size, direction.GetAngle(), 1f,
+                AOEWarningFactory.HostileWarningColor);
+        }
+
+        internal static void RegisterMoleBigBombMissile(Vector2 position)
+        {
+            specialBossDangerCenter = position;
+            specialBossDangerRadius = 7.5f;
+            specialBossDangerUntil = Time.unscaledTime + 2.25f;
+            specialBossEscapeDestination = Vector3.zero;
         }
 
         internal static void RegisterServerMessages()
@@ -550,7 +748,9 @@ namespace SephiriaTogether
 
         private static void SendState(bool force)
         {
-            if (!NetworkClient.active || !NetworkClient.ready || !force && Time.unscaledTime < nextStateSync) return;
+            if (!NetworkClient.active || !NetworkClient.ready ||
+                !NetworkServer.active && !CatchUpRewards.HostSupportsProtocol() ||
+                !force && Time.unscaledTime < nextStateSync) return;
             nextStateSync = Time.unscaledTime + 3f;
             NetworkClient.Send(new AutoPilotStateRequest { enabled = enabled });
         }
@@ -606,6 +806,20 @@ namespace SephiriaTogether
                 WarningTime = Mathf.Max(0.1f, warningTime),
                 ActiveUntil = Time.unscaledTime + Mathf.Max(1.25f, warningTime + 0.6f)
             });
+        }
+
+        internal static void RegisterSpikeEyeMeleeWarning(Unit_SpikeEye spikeEye, Vector2 attackDirection)
+        {
+            if (spikeEye == null) return;
+            UI_AOEWarning_MeleeAttackLine warning = Traverse.Create(spikeEye)
+                .Field("attackWarningObject").GetValue<UI_AOEWarning_MeleeAttackLine>();
+            if (warning == null) return;
+            float width = Mathf.Max(1f, spikeEye.meleeFireData.GetProjectileSize(
+                HorayUtility.GetAngleFromVector(attackDirection)).x);
+            float length = Mathf.Max(3f, spikeEye.meleeAttackMovementSpeed * spikeEye.meleeAttackWarningSize);
+            RegisterHostileBox(warning, spikeEye.transform.position, new Vector2(width, length),
+                HorayUtility.GetAngleFromVector(attackDirection), spikeEye.meleeAttackDelay.time,
+                AOEWarningFactory.HostileWarningColor);
         }
 
         private static bool ApproximatelyHostileColor(Color color)
@@ -668,7 +882,8 @@ namespace SephiriaTogether
 
         private static UnitAvatar FindEnemy(PlayerAvatar player)
         {
-            bool invalid = cachedEnemy == null || cachedEnemy.IsDead || !cachedEnemy.canBeTarget.IsTrue() ||
+            bool invalid = cachedEnemy == null || IsExcludedCombatTarget(cachedEnemy) || cachedEnemy.IsDead ||
+                           !cachedEnemy.canBeTarget.IsTrue() ||
                            (cachedEnemy.transform.position - player.transform.position).sqrMagnitude > 2500f ||
                            UnreachableEnemies.TryGetValue(cachedEnemy.netId, out float retryAt) &&
                            Time.unscaledTime < retryAt;
@@ -688,10 +903,13 @@ namespace SephiriaTogether
         private static UnitAvatar FindNearestReachableCandidate(PlayerAvatar player)
         {
             if (CombatManager.Instance == null) return null;
+            UnitAvatar bossTarget = FindActiveBossTarget(player);
+            if (bossTarget != null) return bossTarget;
             long hostileLayers = player.GetHostileFactionLayers(EDamageFromType.None);
             PathGrid grid = PathGrid.Current;
             IEnumerable<UnitAvatar> candidates = CombatManager.Instance.AllCreatures
-                .Where(candidate => candidate != null && candidate != player && !candidate.IsDead &&
+                .Where(candidate => candidate != null && candidate != player && !IsExcludedCombatTarget(candidate) &&
+                    !candidate.IsDead &&
                     candidate.canBeTarget.IsTrue() &&
                     (hostileLayers & RuntimeFactionManager.Instance.FindFactionLayer(candidate.faction)) != 0L &&
                     (!UnreachableEnemies.TryGetValue(candidate.netId, out float retryAt) ||
@@ -732,17 +950,59 @@ namespace SephiriaTogether
             return null;
         }
 
+        private static UnitAvatar FindActiveBossTarget(PlayerAvatar player)
+        {
+            if (!IsBossFloor(player)) return null;
+            RefreshWorldObjectCache(player);
+            UnitAvatar boss = cachedBossSpawner?.bossObject ?? cachedSeedBossSpawner?.bossObject;
+            if (boss is Unit_RootDemon rootDemon)
+            {
+                Unit_RootDemonPart part = rootDemon.roots
+                    .Where(candidate => candidate != null && !candidate.IsDead && !candidate.isDestroyed &&
+                                        candidate.IsEyeOpened && candidate.canBeTarget.IsTrue())
+                    .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                    .FirstOrDefault();
+                if (part != null) return part;
+            }
+            if (boss != null && !boss.IsDead && boss.canBeTarget.IsTrue()) return boss;
+
+            return CombatManager.Instance.AllCreatures
+                .Where(candidate => candidate != null && candidate != player && !candidate.IsDead &&
+                                    candidate.canBeTarget.IsTrue() &&
+                                    (candidate.monsterType == EMonsterType.Boss ||
+                                     candidate is Unit_RootDemonPart part && !part.isDestroyed && part.IsEyeOpened))
+                .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                .FirstOrDefault();
+        }
+
         private static UnitAvatar FindQuestObjectiveCreature(PlayerAvatar player)
         {
             FloorGenerator floor = player != null ? FloorGenerator.FindByGuid(player.currentFloorGuid) : null;
             if (floor == null || floor.isQuestObjectiveCompleted || string.IsNullOrEmpty(floor.questBoardEventId) ||
                 CombatManager.Instance == null) return null;
+
+            Func<UnitAvatar, bool> matchesObjective;
+            if (string.Equals(floor.questBoardEventId, "Explore_Miniboss", StringComparison.OrdinalIgnoreCase))
+                matchesObjective = candidate => candidate.monsterType == EMonsterType.Miniboss;
+            else if (string.Equals(floor.questBoardEventId, "AttackCamp", StringComparison.OrdinalIgnoreCase))
+                matchesObjective = candidate => string.Equals(candidate.faction, "Fanatic",
+                    StringComparison.OrdinalIgnoreCase);
+            else
+                return null;
+
             return CombatManager.Instance.AllCreatures
                 .Where(candidate => candidate != null && candidate != player && !(candidate is PlayerAvatar) &&
-                                    !candidate.IsDead && candidate.canBeTarget.IsTrue() &&
-                                    (candidate.transform.position - player.transform.position).sqrMagnitude <= 2500f)
+                                     !IsExcludedCombatTarget(candidate) && !candidate.IsDead &&
+                                     candidate.canBeTarget.IsTrue() && matchesObjective(candidate) &&
+                                     (candidate.transform.position - player.transform.position).sqrMagnitude <= 2500f)
                 .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
                 .FirstOrDefault();
+        }
+
+        private static bool IsExcludedCombatTarget(UnitAvatar candidate)
+        {
+            return candidate == null || candidate is PlayerAvatar ||
+                   string.Equals(candidate.faction, "Merchant", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void TrackEnemyProgress(PlayerAvatar player)
@@ -822,7 +1082,12 @@ namespace SephiriaTogether
         private static bool TryEvadeAoe(PlayerAvatar player, UnitAvatar enemy, out Vector2 movement)
         {
             movement = Vector2.zero;
-            ActiveAoeThreats.RemoveAll(threat => Time.unscaledTime >= threat.ActiveUntil);
+            ActiveAoeThreats.RemoveAll(threat => Time.unscaledTime >= threat.ActiveUntil ||
+                threat.Warning == null || !threat.Warning.gameObject.activeInHierarchy || !threat.Warning.IsSpawned);
+            if (activeAoeEscape != null && (Time.unscaledTime >= activeAoeEscape.ActiveUntil ||
+                activeAoeEscape.Warning == null || !activeAoeEscape.Warning.gameObject.activeInHierarchy ||
+                !activeAoeEscape.Warning.IsSpawned))
+                activeAoeEscape = null;
             Vector3 position = player.transform.position;
             AoeThreat threat = ActiveAoeThreats
                 .Where(candidate => IsInsideAoe(candidate, position))
@@ -849,7 +1114,7 @@ namespace SephiriaTogether
                 nextAoeEscapeSearch = Time.unscaledTime + 0.25f;
                 if (!TryFindAoeEscape(player, threat, out aoeEscapeDestination))
                 {
-                    Vector2 fallback = player.transform.position - threat.Center;
+                    Vector2 fallback = ThreatEscapeDirection(threat, player.transform.position);
                     if (fallback.sqrMagnitude < 0.01f && enemy != null)
                         fallback = player.transform.position - enemy.transform.position;
                     if (fallback.sqrMagnitude < 0.01f) fallback = Vector2.right;
@@ -861,6 +1126,7 @@ namespace SephiriaTogether
                         player.Dash(player.transform.position + (Vector3)(fallback * 4f));
                         nextDash = Time.unscaledTime + 0.5f;
                     }
+                    aoeEscapeDestination = player.transform.position + (Vector3)(fallback * 3f);
                     movement = fallback;
                     return true;
                 }
@@ -877,6 +1143,7 @@ namespace SephiriaTogether
                 nextDash = Time.unscaledTime + 0.5f;
             }
             movement = Navigate(player, aoeEscapeDestination, 0.2f);
+            if (movement.sqrMagnitude < 0.01f) movement = direction;
             return true;
         }
 
@@ -945,24 +1212,25 @@ namespace SephiriaTogether
         private static bool TryEvadeGroundDynamite(PlayerAvatar player, out Vector2 movement)
         {
             movement = Vector2.zero;
-            Bullet nearest = ActiveBullets
+            List<Bullet> dynamites = ActiveBullets
                 .Where(bullet => bullet != null && bullet.IsSpawned && bullet.gameObject.activeInHierarchy &&
-                                 bullet.Owner != player &&
-                                 bullet.GetComponent<BulletAnimationTransitionController_Dynamite>() != null &&
-                                 CombatManager.ContainsAttackableFaction(bullet.AttackableFactionLayers, player.faction))
+                                  bullet.Owner != player &&
+                                  bullet.GetComponent<BulletAnimationTransitionController_Dynamite>() != null &&
+                                  IsGroundedDynamite(bullet) &&
+                                  CombatManager.ContainsAttackableFaction(bullet.AttackableFactionLayers, player.faction))
                 .OrderBy(bullet => (bullet.transform.position - player.transform.position).sqrMagnitude)
-                .FirstOrDefault();
+                .ToList();
+            Bullet nearest = dynamites.FirstOrDefault();
             if (nearest == null) return false;
             Vector2 away = player.transform.position - nearest.transform.position;
-            const float dangerRadius = 4.5f;
+            const float dangerRadius = 6f;
             if (away.sqrMagnitude > dangerRadius * dangerRadius) return false;
             if (Time.unscaledTime >= nextDynamiteSearch)
             {
-                nextDynamiteSearch = Time.unscaledTime + 0.25f;
+                nextDynamiteSearch = Time.unscaledTime + 0.15f;
                 if (away.sqrMagnitude < 0.01f) away = Vector2.right;
-                Vector3 preferred = nearest.transform.position + (Vector3)(away.normalized * (dangerRadius + 1f));
-                if (!TryReachablePointNear(player, preferred, out dynamiteEscapeDestination))
-                    dynamiteEscapeDestination = preferred;
+                if (!TryFindDynamiteEscape(player, dynamites, out dynamiteEscapeDestination))
+                    dynamiteEscapeDestination = player.transform.position + (Vector3)(away.normalized * 4f);
             }
             Vector2 escape = dynamiteEscapeDestination - player.transform.position;
             if (Time.unscaledTime >= nextDynamiteDiagnostic)
@@ -971,7 +1239,7 @@ namespace SephiriaTogether
                 Plugin.LogInfo($"AFK dynamite evade: dynamite={nearest.transform.position}, " +
                                $"target={dynamiteEscapeDestination}, distance={Mathf.Sqrt(away.sqrMagnitude):0.00}.");
             }
-            if (away.sqrMagnitude <= 6.25f && Time.unscaledTime >= nextDash && player.CanMove)
+            if (away.sqrMagnitude <= 16f && Time.unscaledTime >= nextDash && player.CanMove)
             {
                 player.Dash(player.transform.position + (Vector3)(escape.normalized * 4f));
                 nextDash = Time.unscaledTime + 0.5f;
@@ -979,6 +1247,71 @@ namespace SephiriaTogether
             movement = Navigate(player, dynamiteEscapeDestination, 0.2f);
             if (movement.sqrMagnitude < 0.01f) movement = escape.normalized;
             return true;
+        }
+
+        private static bool TryEvadeSpecialBossDanger(PlayerAvatar player, out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            if (Time.unscaledTime >= specialBossDangerUntil || specialBossDangerRadius <= 0f) return false;
+            Vector2 away = player.transform.position - specialBossDangerCenter;
+            if (away.sqrMagnitude > specialBossDangerRadius * specialBossDangerRadius) return false;
+            if (specialBossEscapeDestination == Vector3.zero ||
+                (specialBossEscapeDestination - player.transform.position).sqrMagnitude <= 0.25f)
+            {
+                if (away.sqrMagnitude < 0.01f) away = Vector2.right;
+                Vector3 preferred = specialBossDangerCenter + (Vector3)(away.normalized *
+                    (specialBossDangerRadius + 1.5f));
+                if (!TryReachablePointNear(player, preferred, out specialBossEscapeDestination))
+                    specialBossEscapeDestination = player.transform.position + (Vector3)(away.normalized * 4f);
+            }
+            Vector2 escape = specialBossEscapeDestination - player.transform.position;
+            if (escape.sqrMagnitude < 0.01f) escape = away.sqrMagnitude > 0.01f ? away : Vector2.right;
+            if (away.sqrMagnitude <= 25f && Time.unscaledTime >= nextDash && player.CanMove)
+            {
+                player.Dash(player.transform.position + (Vector3)(escape.normalized * 4f));
+                nextDash = Time.unscaledTime + 0.5f;
+            }
+            movement = Navigate(player, specialBossEscapeDestination, 0.2f);
+            if (movement.sqrMagnitude < 0.01f) movement = escape.normalized;
+            return true;
+        }
+
+        private static bool IsGroundedDynamite(Bullet bullet)
+        {
+            TopdownRigidbody body = bullet?.MoveModule?.TopdownRigidbody;
+            return body == null || body.IsGrounded || body.YPosition <= 1.5f;
+        }
+
+        private static bool TryFindDynamiteEscape(PlayerAvatar player, List<Bullet> dynamites,
+            out Vector3 destination)
+        {
+            destination = Vector3.zero;
+            PathGrid grid = PathGrid.Current;
+            if (grid == null || !grid.IsBuilt || dynamites == null || dynamites.Count == 0) return false;
+            float bestScore = float.MinValue;
+            float[] radii = { 3f, 4.5f, 6f, 7.5f };
+            for (int i = 0; i < 24; i++)
+            {
+                float angle = i * Mathf.PI * 2f / 24f;
+                Vector3 direction = new Vector3(Mathf.Cos(angle), Mathf.Sin(angle));
+                foreach (float radius in radii)
+                {
+                    Vector3 point = player.transform.position + direction * radius;
+                    if (!grid.WorldToCell(point, out int x, out int y) || grid.IsBlocked(x, y)) continue;
+                    Vector3 world = grid.CellToWorld(x, y);
+                    if (IsInsideAnyAoe(world)) continue;
+                    AoeEscapePath.Clear();
+                    if (!PathFinder.Find(grid, player.transform.position, world, AoeEscapePath) ||
+                        AoeEscapePath.Count == 0) continue;
+                    float nearestDanger = dynamites.Min(bullet =>
+                        (bullet.transform.position - world).sqrMagnitude);
+                    float score = nearestDanger - AoeEscapePath.Count * 0.15f;
+                    if (score <= bestScore) continue;
+                    bestScore = score;
+                    destination = world;
+                }
+            }
+            return bestScore > float.MinValue;
         }
 
         private static bool TryEvadeProjectile(PlayerAvatar player, out Vector2 movement)
@@ -992,20 +1325,36 @@ namespace SephiriaTogether
             float nearestDistance = 9f;
             foreach (Bullet bullet in ActiveBullets)
             {
-                if (bullet == null || !bullet.IsSpawned || !bullet.isCollisionEnabled || bullet.Owner == player ||
-                    bullet.MoveModule == null || bullet.MoveModule is BulletMoveModule_Laser ||
+                if (bullet == null || !bullet.IsSpawned || bullet.Owner == player ||
+                    bullet.MoveModule is BulletMoveModule_Laser ||
                     bullet.GetComponent<BulletAnimationTransitionController_Dynamite>() != null ||
                     !CombatManager.ContainsAttackableFaction(bullet.AttackableFactionLayers, player.faction)) continue;
+                bool rootDemonProjectile = bullet.Owner is Unit_RootDemonPart;
+                if (bullet.MoveModule == null && !rootDemonProjectile) continue;
                 Vector2 delta = player.transform.position - bullet.transform.position;
-                Vector2 direction = bullet.MoveModule.CurMovingDirection;
-                if (delta.sqrMagnitude >= nearestDistance || direction.sqrMagnitude < 0.01f ||
+                Vector2 direction = bullet.MoveModule != null
+                    ? bullet.MoveModule.CurMovingDirection
+                    : Vector2.zero;
+                bool rootDemonPointAttack = rootDemonProjectile && direction.sqrMagnitude < 0.01f;
+                if (!bullet.isCollisionEnabled && !rootDemonPointAttack) continue;
+                if (delta.sqrMagnitude >= nearestDistance) continue;
+                if (direction.sqrMagnitude >= 0.01f &&
                     Vector2.Dot(direction.normalized, delta.normalized) < 0.55f) continue;
                 nearestDistance = delta.sqrMagnitude;
                 threat = bullet;
-                travel = direction.normalized;
+                travel = direction.sqrMagnitude >= 0.01f ? direction.normalized : Vector2.zero;
             }
             if (threat == null) return false;
-            Vector2 perpendicular = new Vector2(-travel.y, travel.x);
+            Vector2 perpendicular;
+            if (travel.sqrMagnitude < 0.01f)
+            {
+                Vector2 away = player.transform.position - threat.transform.position;
+                perpendicular = away.sqrMagnitude > 0.01f ? away.normalized : Vector2.right;
+            }
+            else
+            {
+                perpendicular = new Vector2(-travel.y, travel.x);
+            }
             Vector3 destination;
             if (!TryReachablePointNear(player, player.transform.position + (Vector3)(perpendicular * 3f), out destination) &&
                 !TryReachablePointNear(player, player.transform.position - (Vector3)(perpendicular * 3f), out destination))
@@ -1084,6 +1433,16 @@ namespace SephiriaTogether
                 }
                 yield break;
             }
+            if (threat.Shape == AoeShape.Ellipse)
+            {
+                for (int i = 0; i < 16; i++)
+                {
+                    float angle = i * Mathf.PI * 2f / 16f;
+                    yield return threat.Center + new Vector3(Mathf.Cos(angle) * (threat.Size.x + 0.75f),
+                        Mathf.Sin(angle) * (threat.Size.y + 0.75f));
+                }
+                yield break;
+            }
             if (threat.Shape == AoeShape.Segment)
             {
                 Vector2 a = threat.From;
@@ -1128,6 +1487,12 @@ namespace SephiriaTogether
             Vector2 p = point;
             if (threat.Shape == AoeShape.Circle)
                 return (p - (Vector2)threat.Center).sqrMagnitude <= threat.Radius * threat.Radius;
+            if (threat.Shape == AoeShape.Ellipse)
+            {
+                Vector2 delta = p - (Vector2)threat.Center;
+                return delta.x * delta.x / (threat.Size.x * threat.Size.x) +
+                       delta.y * delta.y / (threat.Size.y * threat.Size.y) <= 1f;
+            }
             if (threat.Shape == AoeShape.Segment)
             {
                 Vector2 a = threat.From;
@@ -1140,6 +1505,21 @@ namespace SephiriaTogether
             }
             Vector2 local = Quaternion.Euler(0f, 0f, -threat.Angle) * (p - (Vector2)threat.Center);
             return Mathf.Abs(local.x) <= threat.Size.x * 0.5f && Mathf.Abs(local.y) <= threat.Size.y * 0.5f;
+        }
+
+        private static Vector2 ThreatEscapeDirection(AoeThreat threat, Vector2 position)
+        {
+            if (threat == null) return Vector2.zero;
+            if (threat.Shape == AoeShape.Segment)
+                return position - ClosestPointOnSegment(position, threat.From, threat.To);
+            if (threat.Shape == AoeShape.Ellipse)
+            {
+                Vector2 delta = position - (Vector2)threat.Center;
+                if (delta.sqrMagnitude < 0.01f) return Vector2.right;
+                return new Vector2(delta.x / Mathf.Max(0.1f, threat.Size.x),
+                    delta.y / Mathf.Max(0.1f, threat.Size.y));
+            }
+            return position - (Vector2)threat.Center;
         }
 
         private static bool TryRescueTeammate(PlayerAvatar player, UnitAvatar enemy, out Vector2 movement)
@@ -1320,6 +1700,72 @@ namespace SephiriaTogether
             rescueChannelPosition = Vector3.zero;
         }
 
+        private static bool TryApproachPresetMiracle(PlayerAvatar player, out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            if (player == null || player.IsInBattle || MiraclePresetTerms().Length == 0) return false;
+            bool miracleFloor = CurrentFloorEvent(player) == EFloorMainEventType.Miracle;
+            if (miracleFloor && ResolvedMiracleFloors.Contains(player.currentFloorGuid)) return false;
+
+            bool scannedNow = worldObjectFloor != player.currentFloorGuid || Time.unscaledTime >= nextWorldObjectScan;
+            RefreshWorldObjectCache(player);
+            if (miracleFloor && scannedNow && pendingMiracleResolveFloor == player.currentFloorGuid &&
+                Time.unscaledTime >= pendingMiracleResolveAt && cachedMiracleSelector == null)
+            {
+                ResolvedMiracleFloors.Add(player.currentFloorGuid);
+                pendingMiracleResolveFloor = null;
+                pendingMiracleResolveAt = 0f;
+                return false;
+            }
+            MiracleSelector2 selector = cachedMiracleSelector != null &&
+                                        (cachedMiracleSelector.netId == 0 ||
+                                         !SkippedMiracles.Contains(cachedMiracleSelector.netId))
+                ? cachedMiracleSelector
+                : null;
+            if (selector == null)
+            {
+                LogMiracleDiagnostic(player, null, miracleFloor ? "waiting-selector" : "no-selector");
+                return miracleFloor;
+            }
+            if (Traverse.Create(selector).Property("LocalAcquired").GetValue<bool>())
+            {
+                IgnoreMiracleSelector(player, selector);
+                return miracleFloor;
+            }
+
+            Interactable interactable = selector.interactable;
+            if (interactable == null || !interactable.enabled || !interactable.IsInteractable(player.gameObject))
+            {
+                LogMiracleDiagnostic(player, selector, "not-interactable");
+                cachedMiracleSelector = null;
+                nextWorldObjectScan = 0f;
+                return miracleFloor;
+            }
+            Vector2 delta = selector.transform.position - player.transform.position;
+            if (delta.sqrMagnitude > 2.25f)
+            {
+                LogMiracleDiagnostic(player, selector, "approaching");
+                movement = Navigate(player, selector.transform.position, 1.5f);
+                return true;
+            }
+            if (Time.unscaledTime >= nextEntranceInteraction)
+            {
+                nextEntranceInteraction = Time.unscaledTime + 1f;
+                interactable.Interactive(player.gameObject);
+                LogMiracleDiagnostic(player, selector, "opened");
+            }
+            return true;
+        }
+
+        private static void LogMiracleDiagnostic(PlayerAvatar player, MiracleSelector2 selector, string reason)
+        {
+            if (Time.unscaledTime < nextMiracleDiagnostic) return;
+            nextMiracleDiagnostic = Time.unscaledTime + 1f;
+            Plugin.LogInfo($"AFK Miracle: reason={reason}, player={player?.Name}, " +
+                           $"floor={ShortGuid(player?.currentFloorGuid)}, selector={selector?.netId ?? 0}, " +
+                           $"position={selector?.transform.position}, presets={string.Join("|", MiraclePresetTerms())}.");
+        }
+
         private static bool TryApproachPresetChoice(PlayerAvatar player, out Vector2 movement)
         {
             movement = Vector2.zero;
@@ -1455,6 +1901,16 @@ namespace SephiriaTogether
             return floor.mainEventType;
         }
 
+        private static bool IsBossFloor(PlayerAvatar player)
+        {
+            if (player == null || string.IsNullOrEmpty(player.currentFloorGuid)) return false;
+            FloorGenerator generator = FloorGenerator.FindByGuid(player.currentFloorGuid);
+            if (generator != null && generator.floorThreatType == EFloorThreatType.Boss) return true;
+            return DungeonManager.Instance != null &&
+                   DungeonManager.Instance.generatedFloors.TryGetValue(player.currentFloorGuid, out FloorData floor) &&
+                   floor.threatType == EFloorThreatType.Boss;
+        }
+
         private static bool TryApproachQuestObjective(PlayerAvatar player, out Vector2 movement)
         {
             movement = Vector2.zero;
@@ -1463,6 +1919,7 @@ namespace SephiriaTogether
                 floor.isQuestObjectiveCompleted) return false;
 
             RefreshQuestObjects(floor);
+            if (TryApproachQuestProp(player, floor, out movement)) return true;
             BattleZone battleZone = cachedQuestBattleZones
                 .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
                                     candidate.spawner != null && !candidate.spawner.isCleared)
@@ -1551,12 +2008,83 @@ namespace SephiriaTogether
             return true;
         }
 
+        private static bool TryApproachQuestProp(PlayerAvatar player, FloorGenerator floor, out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            GrasslandTownEventEntity quest = GetQuestEvent(floor);
+            if (quest == null || quest.eventObjectiveType != GrasslandTownEventEntity.EEventObjectiveType.GatherQuestProp)
+                return false;
+
+            Component target = null;
+            Interactable interactable = null;
+            if (string.Equals(floor.questBoardEventId, "Explore_FindWood", StringComparison.OrdinalIgnoreCase))
+            {
+                QuestBoardProp_GatherResources resource = cachedQuestResources
+                    .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                        !candidate.isGathered && candidate.floorGenerator == floor &&
+                                        candidate.interactable != null && candidate.interactable.enabled)
+                    .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                    .FirstOrDefault();
+                target = resource;
+                interactable = resource?.interactable;
+            }
+            else if (string.Equals(floor.questBoardEventId, "Rescue", StringComparison.OrdinalIgnoreCase))
+            {
+                QuestBoardProp_Jail jail = cachedQuestJails
+                    .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                        !candidate.isGathered && candidate.floorGenerator == floor &&
+                                        candidate.interactable != null && candidate.interactable.enabled)
+                    .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                    .FirstOrDefault();
+                target = jail;
+                interactable = jail?.interactable;
+            }
+
+            if (target == null || interactable == null) return true;
+            Vector2 delta = target.transform.position - player.transform.position;
+            if (delta.sqrMagnitude > 2.25f)
+                movement = Navigate(player, target.transform.position, 1.25f);
+            else if (Time.unscaledTime >= nextEntranceInteraction && interactable.IsInteractable(player.gameObject))
+            {
+                nextEntranceInteraction = Time.unscaledTime + 1f;
+                interactable.Interactive(player.gameObject);
+            }
+            if (Time.unscaledTime >= nextEntranceDiagnostic)
+            {
+                nextEntranceDiagnostic = Time.unscaledTime + 2f;
+                Plugin.LogInfo($"AFK quest prop: floor={ShortGuid(player.currentFloorGuid)}, " +
+                               $"event={floor.questBoardEventId}, target={target.name}, " +
+                               $"distance={delta.magnitude:0.0}, progress={floor.currentObjectiveCount}/" +
+                               $"{quest.targetObjectiveCount}.");
+            }
+            return true;
+        }
+
+        private static GrasslandTownEventEntity GetQuestEvent(FloorGenerator floor)
+        {
+            if (floor == null || DungeonManager.Instance == null ||
+                !DungeonManager.Instance.generatedFloors.TryGetValue(floor.guid, out FloorData data) ||
+                !(DungeonManager.Instance.FindStage(data.stageName) is StageEntity_GrasslandTown stage))
+                return null;
+            return stage.nodeEvents.FirstOrDefault(candidate => candidate != null &&
+                string.Equals(candidate.id, floor.questBoardEventId, StringComparison.OrdinalIgnoreCase));
+        }
+
         private static void RefreshQuestObjects(FloorGenerator floor)
         {
             if (floor == null) return;
             if (questObjectScanFloor == floor.guid && Time.unscaledTime < nextQuestObjectScan) return;
             questObjectScanFloor = floor.guid;
             nextQuestObjectScan = Time.unscaledTime + 5f;
+
+            cachedQuestResources = Resources.FindObjectsOfTypeAll<QuestBoardProp_GatherResources>()
+                .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                    candidate.floorGenerator == floor)
+                .ToList();
+            cachedQuestJails = Resources.FindObjectsOfTypeAll<QuestBoardProp_Jail>()
+                .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                    candidate.floorGenerator == floor)
+                .ToList();
 
             List<BattleZone> registered = Traverse.Create(floor).Field("allBattleZones").GetValue<List<BattleZone>>();
             cachedQuestBattleZones = (registered ?? new List<BattleZone>())
@@ -1631,17 +2159,46 @@ namespace SephiriaTogether
         private static bool TryApproachBossTrigger(PlayerAvatar player, out Vector2 movement)
         {
             movement = Vector2.zero;
+            bool bossFloor = IsBossFloor(player);
+            if (bossFloor && CompletedBossFloors.Contains(player.currentFloorGuid)) return false;
             RefreshWorldObjectCache(player);
+            SeedBossSpawner seedSpawner = cachedSeedBossSpawner;
+            BossSpawner regularSpawner = cachedBossSpawner;
+            if (seedSpawner != null &&
+                (regularSpawner == null ||
+                 (seedSpawner.transform.position - player.transform.position).sqrMagnitude <
+                 (regularSpawner.transform.position - player.transform.position).sqrMagnitude))
+                return TryApproachSeedBossTrigger(player, seedSpawner, out movement);
             BossSpawner spawner = cachedBossSpawner;
-            if (spawner == null || spawner.IsCleared || spawner.IsBossBattleInProgress)
+            if (spawner == null)
             {
+                if (!bossFloor) return false;
+                if (Time.unscaledTime >= nextBossSpawnerDiagnostic)
+                {
+                    nextBossSpawnerDiagnostic = Time.unscaledTime + 2f;
+                    Plugin.LogInfo($"AFK Boss floor waiting for BossSpawner: floor={ShortGuid(player.currentFloorGuid)}, " +
+                                   $"pos={player.transform.position}, grid={(PathGrid.Current != null && PathGrid.Current.IsBuilt)}.");
+                }
+                ResetPath();
+                return true;
+            }
+            if (spawner.IsCleared)
+            {
+                CompletedBossFloors.Add(player.currentFloorGuid);
+                Plugin.LogInfo($"AFK Boss floor already cleared: floor={ShortGuid(player.currentFloorGuid)}, " +
+                               $"spawner={spawner.name}.");
                 cachedBossSpawner = null;
+                bossTriggerDestination = Vector3.zero;
+                bossTriggerSpawnerId = 0;
                 return false;
             }
+            if (spawner.IsBossBattleInProgress) return false;
             int spawnerId = spawner.GetInstanceID();
             if (CompletedBossSpawners.Contains(spawnerId))
             {
                 cachedBossSpawner = null;
+                bossTriggerDestination = Vector3.zero;
+                bossTriggerSpawnerId = 0;
                 return false;
             }
             if (spawner.bossObject != null) StartedBossSpawners.Add(spawnerId);
@@ -1652,7 +2209,19 @@ namespace SephiriaTogether
                                $"spawner={spawner.name}, boss={(spawner.bossObject != null ? DescribeUnit(spawner.bossObject) : "destroyed")}.");
                 cachedBossSpawner = null;
                 CompletedBossSpawners.Add(spawnerId);
+                bossTriggerDestination = Vector3.zero;
+                bossTriggerSpawnerId = 0;
                 return false;
+            }
+
+            if (bossTriggerSpawnerId != spawnerId)
+            {
+                bossTriggerSpawnerId = spawnerId;
+                bossTriggerDestination = Vector3.zero;
+                bossTriggerFloor = null;
+                waitingBossSpawnerId = 0;
+                waitingBossSince = 0f;
+                ResetPath();
             }
 
             Vector2 lower = (Vector2)spawner.transform.position + spawner.detectArea_lb;
@@ -1687,6 +2256,16 @@ namespace SephiriaTogether
                                    $"floor={ShortGuid(player.currentFloorGuid)}, spawner={spawner.name}.");
                     return false;
                 }
+                if (NetworkServer.active && spawner.isServer &&
+                    spawner.bossBattleStartDetectType == BossSpawner.EBossBattleStartDetectType.Collide &&
+                    Time.unscaledTime >= nextBossTriggerInteraction)
+                {
+                    nextBossTriggerInteraction = Time.unscaledTime + 1f;
+                    spawner.StartBattleExternal(player);
+                    Plugin.LogInfo($"AFK explicitly started BossSpawner after entering trigger: " +
+                                   $"floor={ShortGuid(player.currentFloorGuid)}, spawner={spawner.name}, " +
+                                   $"position={player.transform.position}.");
+                }
                 return true;
             }
             if (bossTriggerFloor != player.currentFloorGuid || bossTriggerDestination == Vector3.zero ||
@@ -1704,6 +2283,52 @@ namespace SephiriaTogether
                                $"destination={bossTriggerDestination}, area={lower}->{upper}, safe={safeMin}->{safeMax}.");
             }
             movement = Navigate(player, bossTriggerDestination, 0.1f);
+            return true;
+        }
+
+        private static bool TryApproachSeedBossTrigger(PlayerAvatar player, SeedBossSpawner spawner,
+            out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            if (spawner == null) return false;
+            if (spawner.bossObject != null)
+            {
+                if (spawner.bossObject.IsDead)
+                {
+                    CompletedBossFloors.Add(player.currentFloorGuid);
+                    cachedSeedBossSpawner = null;
+                    bossTriggerDestination = Vector3.zero;
+                    bossTriggerSpawnerId = 0;
+                    Plugin.LogInfo($"AFK Seed Boss defeat detected: floor={ShortGuid(player.currentFloorGuid)}, " +
+                                   $"spawner={spawner.name}.");
+                    return false;
+                }
+                ResetPath();
+                return true;
+            }
+
+            if (bossTriggerSpawnerId != spawner.GetInstanceID())
+            {
+                bossTriggerSpawnerId = spawner.GetInstanceID();
+                bossTriggerDestination = Vector3.zero;
+                bossTriggerFloor = null;
+                waitingBossSpawnerId = 0;
+                waitingBossSince = 0f;
+                ResetPath();
+            }
+            Vector2 delta = spawner.transform.position - player.transform.position;
+            if (delta.sqrMagnitude > 64f)
+            {
+                movement = Navigate(player, spawner.transform.position, 7f);
+                return true;
+            }
+            if (NetworkServer.active && spawner.isServer && Time.unscaledTime >= nextBossTriggerInteraction)
+            {
+                nextBossTriggerInteraction = Time.unscaledTime + 1f;
+                spawner.SpawnBoss(player.gameObject);
+                Plugin.LogInfo($"AFK requested Seed Boss spawn: floor={ShortGuid(player.currentFloorGuid)}, " +
+                               $"spawner={spawner.name}, position={player.transform.position}.");
+            }
             return true;
         }
 
@@ -1749,28 +2374,25 @@ namespace SephiriaTogether
         private static bool TryApproachNextEntrance(PlayerAvatar player, out Vector2 movement)
         {
             movement = Vector2.zero;
+            if (IsBossFloor(player) && !CompletedBossFloors.Contains(player.currentFloorGuid))
+            {
+                LogEntranceDiagnostic(player, cachedEntrance, "blocked-until-boss-cleared");
+                return false;
+            }
             if (player.IsInBattle && !CompletedBossFloors.Contains(player.currentFloorGuid)) return false;
             RefreshWorldObjectCache(player);
             Interactable entrance = cachedEntrance;
             if (entrance == null) return false;
-            bool namedUpFloorMover = IsNamedUpFloorMover(entrance);
-            bool questReturnFloorMover = IsQuestReturnFloorMover(entrance);
-            if (!entrance.IsInteractable(player.gameObject) && !namedUpFloorMover && !questReturnFloorMover)
+            bool questReturnFloorMover = IsQuestReturnFloorMover(player, entrance);
+            if (!entrance.IsInteractable(player.gameObject) && !questReturnFloorMover)
             {
                 LogEntranceDiagnostic(player, entrance, "not-interactable");
                 return false;
             }
-            if (namedUpFloorMover && !entrance.IsInteractable(player.gameObject))
-                LogEntranceDiagnostic(player, entrance, "named-up-floor-mover-bypass");
             Vector2 delta = entrance.transform.position - player.transform.position;
             int entranceId = entrance.GetInstanceID();
             bool atApproach = entranceApproachId == entranceId && entranceApproachDestination != Vector3.zero &&
-                              (entranceApproachDestination - player.transform.position).sqrMagnitude <= 0.25f;
-            if (namedUpFloorMover && delta.sqrMagnitude > 2.25f)
-            {
-                movement = delta.normalized;
-                return true;
-            }
+                               (entranceApproachDestination - player.transform.position).sqrMagnitude <= 0.25f;
             if (delta.sqrMagnitude > 2.25f && !atApproach)
             {
                 if (entranceApproachId != entranceId || Time.unscaledTime >= nextEntranceApproachSearch ||
@@ -1797,13 +2419,6 @@ namespace SephiriaTogether
             if (Time.unscaledTime >= nextEntranceInteraction)
             {
                 nextEntranceInteraction = Time.unscaledTime + 2f;
-                if (namedUpFloorMover)
-                {
-                    entrance.Interactive(player.gameObject);
-                    Plugin.LogInfo($"AFK autopilot used named up entrance: player={player.Name}, " +
-                                   $"entrance={entrance.name}, interactable={entrance.IsInteractable(player.gameObject)}.");
-                    return true;
-                }
                 if (questReturnFloorMover)
                 {
                     entrance.Interactive(player.gameObject);
@@ -2002,17 +2617,29 @@ namespace SephiriaTogether
                 item.Acquire(player.Inventory);
         }
 
-        private static void TryAutoArrangeInventory(PlayerAvatar player, UnitAvatar enemy)
+        private static void TryAutoArrangeInventory(PlayerAvatar player, UnitAvatar enemy,
+            string action, Vector2 movement)
         {
             if (!Plugin.autoArrangeInventory.Value)
             {
-                lastInventorySignature = null;
-                pendingInventorySignature = null;
-                arrangeInventoryAt = 0f;
+                ResetInventoryArrangeTracking(resetLastSignature: true, resetCooldown: true);
                 return;
             }
             GridInventory inventory = player.Inventory;
             if (inventory == null) return;
+            if (SaveManager.IsSaving != SaveManager.ESaveState.None)
+            {
+                pendingInventorySignature = null;
+                arrangeInventoryAt = 0f;
+                nextInventorySignatureCheck = Time.unscaledTime + 0.5f;
+                return;
+            }
+            if (inventory.CurrentInventoryStorage <= 1 || inventory.charms.Count == 0)
+            {
+                pendingInventorySignature = null;
+                arrangeInventoryAt = 0f;
+                return;
+            }
             FloorGenerator floor = FloorGenerator.FindByGuid(player.currentFloorGuid);
             if (floor != null && !string.IsNullOrEmpty(floor.questBoardEventId))
             {
@@ -2020,9 +2647,16 @@ namespace SephiriaTogether
                 arrangeInventoryAt = 0f;
                 return;
             }
+            if (action != "idle" || movement.sqrMagnitude > 0.01f || player.IsInBattle || enemy != null ||
+                player.localDataStorage != null && player.localDataStorage.preparingUIThings)
+            {
+                pendingInventorySignature = null;
+                arrangeInventoryAt = 0f;
+                return;
+            }
             if (Time.unscaledTime < nextInventorySignatureCheck) return;
             nextInventorySignatureCheck = Time.unscaledTime + 0.5f;
-            string signature = InventorySignature(inventory);
+            string signature = InventorySignature(player, inventory);
             if (signature != pendingInventorySignature && signature != lastInventorySignature)
             {
                 pendingInventorySignature = signature;
@@ -2036,31 +2670,106 @@ namespace SephiriaTogether
             pendingInventorySignature = null;
             arrangeInventoryAt = 0f;
             nextInventoryArrangeAllowed = Time.unscaledTime + 5f;
-            inventory.RequestAutoArrangeInventoryForBestCharmLevels(1, allowTabletRotation: true);
+            bool? changed = null;
+            if (inventory.isServer)
+            {
+                changed = inventory.AutoArrangeInventoryForBestCharmLevels(1, allowTabletRotation: true);
+                lastInventorySignature = InventorySignature(player, inventory);
+            }
+            else
+            {
+                inventory.RequestAutoArrangeInventoryForBestCharmLevels(1, allowTabletRotation: true);
+            }
             Plugin.LogInfo($"AFK autopilot requested inventory optimization: player={player.Name}, " +
-                           $"items={inventory.inventoryMatrix.Count}, storage={inventory.CurrentInventoryStorage}.");
+                           $"items={inventory.inventoryMatrix.Count}, storage={inventory.CurrentInventoryStorage}, " +
+                           $"changed={(changed.HasValue ? changed.Value.ToString() : "pending-server")}.");
         }
 
-        private static string InventorySignature(GridInventory inventory)
+        private static string InventorySignature(PlayerAvatar player, GridInventory inventory)
         {
+            WeaponSimple weapon = player?.GetComponent<WeaponControllerSimple>()?.currentWeapon;
             IEnumerable<NewItemOwnInstance> items = inventory.inventoryMatrix.Values
                 .Where(item => item != null)
                 .OrderBy(item => item.InstanceID);
-            return inventory.CurrentInventoryStorage + ":" + inventory.charms.Count + ":" +
+            return (weapon != null ? weapon.entityId.ToString() : "-") + ":" +
+                   inventory.CurrentInventoryStorage + ":" + inventory.charms.Count + ":" +
                    inventory.stoneTablets.Count + ":" + string.Join("|", items.Select(item =>
-                item.InstanceID + "," + item.EntityID + "," + item.Quantity));
+                 item.InstanceID + "," + item.EntityID + "," + item.Quantity + "," +
+                 (item.Charm != null ? item.Charm.DisplayedLevel + "/" + item.Charm.IsEffectEnabled : "-") + "," +
+                 (item.StoneTablet != null ? item.StoneTablet.rotation.ToString() : "-")));
         }
 
-        private static void TryClaimFavoriteReward(PlayerAvatar player)
+        private static void ResetInventoryArrangeTracking(bool resetLastSignature, bool resetCooldown)
         {
-            if (player.Inventory == null || Time.unscaledTime < nextRewardAction) return;
+            if (resetLastSignature) lastInventorySignature = null;
+            pendingInventorySignature = null;
+            nextInventorySignatureCheck = 0f;
+            arrangeInventoryAt = 0f;
+            if (resetCooldown) nextInventoryArrangeAllowed = 0f;
+        }
+
+        private static bool TryHandleFloorReward(PlayerAvatar player, out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            if (TryClaimFavoriteReward(player)) return true;
+            if (CurrentFloorEvent(player) != EFloorMainEventType.StoneTablet) return false;
+
+            if (rewardOpportunityFloor != player.currentFloorGuid)
+            {
+                rewardOpportunityFloor = player.currentFloorGuid;
+                rewardOpportunityWaitUntil = Time.unscaledTime + 5f;
+            }
+
+            AltarOfTabletInteractable choice = Resources.FindObjectsOfTypeAll<AltarOfTabletInteractable>()
+                .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                    candidate.isEnabled && candidate.interactable != null &&
+                                    candidate.interactable.enabled && candidate.selectionPrefab != null &&
+                                    (candidate.transform.position - player.transform.position).sqrMagnitude <= 2500f)
+                .Where(candidate =>
+                {
+                    Sephirite reward = candidate.selectionPrefab.GetComponent<Sephirite>();
+                    return reward != null && (reward.type == Sephirite.Type.TABLET ||
+                                              reward.type == Sephirite.Type.TABLET_BOSS);
+                })
+                .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                .FirstOrDefault();
+            if (choice != null)
+            {
+                Vector3 position = choice.interactable.transform.position;
+                Vector2 delta = position - player.transform.position;
+                if (delta.sqrMagnitude > 2.25f)
+                    movement = Navigate(player, position, 1.25f);
+                else if (Time.unscaledTime >= nextRewardAction &&
+                         choice.interactable.IsInteractable(player.gameObject))
+                {
+                    nextRewardAction = Time.unscaledTime + 1f;
+                    rewardOpportunityWaitUntil = Time.unscaledTime + 2f;
+                    choice.interactable.Interactive(player.gameObject);
+                    Plugin.LogInfo($"AFK autopilot selected vanilla Tablet altar: player={player.Name}, " +
+                                   $"floor={ShortGuid(player.currentFloorGuid)}, altar={choice.name}.");
+                }
+                return true;
+            }
+
+            bool unresolvedAltar = Resources.FindObjectsOfTypeAll<AltarOfTablet>()
+                .Any(altar => altar != null && altar.gameObject.activeInHierarchy &&
+                              (altar.transform.position - player.transform.position).sqrMagnitude <= 2500f &&
+                              altar.selections != null && altar.selections.Any(selection => selection != null &&
+                                  selection.isEnabled));
+            return unresolvedAltar || Time.unscaledTime < rewardOpportunityWaitUntil;
+        }
+
+        private static bool TryClaimFavoriteReward(PlayerAvatar player)
+        {
+            if (player.Inventory == null) return false;
             bool forceTabletOnFloor = IsMutualTabletChoiceFloor(player);
-            if (forceTabletOnFloor && cachedReward != null && cachedReward.type != Sephirite.Type.TABLET)
+            if (forceTabletOnFloor && cachedReward != null && cachedReward.type != Sephirite.Type.TABLET &&
+                cachedReward.type != Sephirite.Type.TABLET_BOSS)
                 cachedReward = null;
             if (cachedReward == null || !cachedReward.gameObject.activeInHierarchy || cachedReward.isAcquired)
             {
                 cachedReward = null;
-                if (Time.unscaledTime < nextRewardScan) return;
+                if (Time.unscaledTime < nextRewardScan) return false;
                 nextRewardScan = Time.unscaledTime + 1f;
                 cachedReward = Resources.FindObjectsOfTypeAll<Sephirite>()
                     .Where(reward => reward != null && reward.gameObject.activeInHierarchy &&
@@ -2069,15 +2778,16 @@ namespace SephiriaTogether
                     .FirstOrDefault();
             }
             Sephirite sephirite = cachedReward;
-            if (sephirite == null) return;
+            if (sephirite == null) return false;
+            if (Time.unscaledTime < nextRewardAction) return true;
             if (!sephirite.isGenerated)
             {
                 sephirite.CmdGenerateItemForOpen(player.gameObject);
                 nextRewardAction = Time.unscaledTime + 1f;
-                return;
+                return true;
             }
             bool forcedTablet = IsForcedTabletChoice(player, sephirite);
-            if (Plugin.autoChoiceStrategy.Value == 2 && !forcedTablet) return;
+            if (Plugin.autoChoiceStrategy.Value == 2 && !forcedTablet) return true;
             int selected = FindRewardIndex(sephirite);
             if (selected >= 0)
             {
@@ -2086,11 +2796,11 @@ namespace SephiriaTogether
                 ItemPosition destination = new ItemPosition(-1, -1);
                 if (result != ItemAdditionCheckResult.Success && result != ItemAdditionCheckResult.Success_Stack)
                 {
-                    if (result != ItemAdditionCheckResult.Full) return;
+                    if (result != ItemAdditionCheckResult.Full) return true;
                     NewItemOwnInstance discard = FindRewardReplacement(player.Inventory, entity);
                     if (discard == null && Plugin.autoFullInventoryStrategy.Value == 2)
                         discard = FindForcedRewardReplacement(player.Inventory);
-                    if (discard == null) return;
+                    if (discard == null) return true;
                     destination = discard.Position;
                     IgnoredDroppedItems.Add(discard.InstanceID);
                     ignoredDropFloor = player.currentFloorGuid;
@@ -2102,12 +2812,15 @@ namespace SephiriaTogether
                 player.SelectSephiriteReward(sephirite, selected, destination);
                 nextRewardAction = Time.unscaledTime + 1.5f;
                 Plugin.LogInfo($"AFK autopilot selected reward: player={player.Name}, item={entity.id}, " +
-                               $"rarity={entity.rarity}, forcedTabletChoice={forcedTablet}.");
+                               $"rarity={entity.rarity}, source={sephirite.name}/{sephirite.type}, " +
+                               $"forcedTabletChoice={forcedTablet}.");
             }
+            return true;
         }
 
         private static bool IsForcedTabletChoice(PlayerAvatar player, Sephirite reward) =>
-            player != null && reward != null && reward.type == Sephirite.Type.TABLET &&
+            player != null && reward != null &&
+            (reward.type == Sephirite.Type.TABLET || reward.type == Sephirite.Type.TABLET_BOSS) &&
             IsMutualTabletChoiceFloor(player);
 
         private static bool IsMutualTabletChoiceFloor(PlayerAvatar player) =>
@@ -2336,6 +3049,130 @@ namespace SephiriaTogether
             });
         }
 
+        internal static void ObserveMiracleOffer(UI_MiraclePanel panel, MiracleController controller,
+            MiracleMetadata[] miracles, MiracleSelector2 selector)
+        {
+            PlayerAvatar local = LocalPlayer();
+            if (panel == null || controller == null || selector == null || local == null ||
+                controller.UnitAvatar != local) return;
+            activeMiraclePanel = panel;
+            activeMiracleController = controller;
+            activeMiracleSelector = selector;
+            activeMiracleOffer = miracles != null ? miracles.ToArray() : new MiracleMetadata[0];
+            miracleRerollPending = false;
+            nextMiracleDecision = Time.unscaledTime + 0.1f;
+        }
+
+        private static void TrySelectPresetMiracle(PlayerAvatar player)
+        {
+            UI_MiraclePanel panel = UIManager.Instance?.GetElement<UI_MiraclePanel>();
+            if (!enabled || player == null || panel == null || !panel.IsOpened) return;
+            string[] presets = MiraclePresetTerms();
+            if (presets.Length == 0)
+            {
+                LeaveMiracleUnclaimed(player, panel, "preset list is empty");
+                return;
+            }
+            if (activeMiraclePanel != panel || activeMiracleController == null ||
+                activeMiracleController.UnitAvatar != player || activeMiracleSelector == null) return;
+            if (Time.unscaledTime < nextMiracleDecision) return;
+            if (miracleRerollPending) return;
+
+            MiracleMetadata? selected = null;
+            Miracle selectedMiracle = null;
+            foreach (string term in presets)
+            {
+                foreach (MiracleMetadata candidate in activeMiracleOffer)
+                {
+                    Miracle miracle = MiracleDatabase.FindMiracle(candidate.id);
+                    if (!MiracleMatches(miracle, term)) continue;
+                    selected = candidate;
+                    selectedMiracle = miracle;
+                    break;
+                }
+                if (selected.HasValue) break;
+            }
+
+            if (selected.HasValue && selectedMiracle != null)
+            {
+                MiracleMetadata choice = selected.Value;
+                MiracleSelector2 selector = activeMiracleSelector;
+                MiracleController controller = activeMiracleController;
+                ItemMetadata[] items = selectedMiracle.GetItems(false, controller, choice.instanceID);
+                if (controller.miracles.Count > 0) controller.RemoveMiracle(0);
+                controller.AddMiracle(choice.id);
+                controller.CloseMiraclePanel();
+                if (items != null)
+                    controller.UnitAvatar.Inventory.AddItemsWithGenerateInstanceID(choice.instanceID, items);
+                selector.HandleMiracleAcquired(controller);
+                IgnoreMiracleSelector(player, selector);
+                Plugin.LogInfo($"AFK autopilot selected preset Miracle: player={player.Name}, " +
+                               $"miracle={choice.id}/{selectedMiracle.Name}, selector={selector.netId}.");
+                ClearActiveMiracleOffer();
+                cachedMiracleSelector = null;
+                return;
+            }
+
+            if (player.rerollDice > 0)
+            {
+                uint netId = activeMiracleSelector.netId;
+                int rerolls = MiracleRerollCounts.TryGetValue(netId, out int count) ? count + 1 : 1;
+                MiracleRerollCounts[netId] = rerolls;
+                miracleRerollPending = true;
+                nextMiracleDecision = Time.unscaledTime + 0.2f;
+                panel.RequestReroll();
+                Plugin.LogInfo($"AFK autopilot rerolled Miracle for preset: player={player.Name}, " +
+                               $"selector={netId}, rerolls={rerolls}, remainingDice={player.rerollDice}.");
+                return;
+            }
+
+            LeaveMiracleUnclaimed(player, panel, "no preset match and no rerolls remain");
+        }
+
+        private static bool MiracleMatches(Miracle miracle, string term)
+        {
+            if (miracle == null || string.IsNullOrWhiteSpace(term)) return false;
+            if (term.StartsWith("miracle:", StringComparison.OrdinalIgnoreCase))
+                return string.Equals(miracle.id, term.Substring(8), StringComparison.OrdinalIgnoreCase);
+            return Contains(miracle.id, term) || Contains(miracle.Name, term) || Contains(miracle.aName.key, term);
+        }
+
+        private static void LeaveMiracleUnclaimed(PlayerAvatar player, UI_MiraclePanel panel, string reason)
+        {
+            MiracleSelector2 selector = activeMiracleSelector;
+            uint netId = selector != null ? selector.netId : 0;
+            if (selector != null) IgnoreMiracleSelector(player, selector);
+            if (MiraclePresetTerms().Length == 0 && CurrentFloorEvent(player) == EFloorMainEventType.Miracle)
+                ResolvedMiracleFloors.Add(player.currentFloorGuid);
+            int rerolls = netId != 0 && MiracleRerollCounts.TryGetValue(netId, out int count) ? count : 0;
+            panel.Close();
+            Plugin.LogInfo($"AFK autopilot left Miracle unclaimed: player={player.Name}, selector={netId}, " +
+                           $"rerolls={rerolls}, remainingDice={player.rerollDice}, reason={reason}.");
+            ClearActiveMiracleOffer();
+            cachedMiracleSelector = null;
+        }
+
+        private static void ClearActiveMiracleOffer()
+        {
+            activeMiraclePanel = null;
+            activeMiracleController = null;
+            activeMiracleSelector = null;
+            activeMiracleOffer = new MiracleMetadata[0];
+            miracleRerollPending = false;
+        }
+
+        private static void IgnoreMiracleSelector(PlayerAvatar player, MiracleSelector2 selector)
+        {
+            if (selector != null && selector.netId != 0) SkippedMiracles.Add(selector.netId);
+            cachedMiracleSelector = null;
+            nextWorldObjectScan = 0f;
+            if (player != null && CurrentFloorEvent(player) == EFloorMainEventType.Miracle)
+            {
+                pendingMiracleResolveFloor = player.currentFloorGuid;
+                pendingMiracleResolveAt = Time.unscaledTime + 2f;
+            }
+        }
+
         private static void TrySelectPresetWeapon(PlayerAvatar player)
         {
             if (!enabled || player == null || WeaponPresetTerms().Length == 0) return;
@@ -2422,6 +3259,8 @@ namespace SephiriaTogether
 
         private static string[] WeaponPresetTerms() => PresetTerms(Plugin.autoWeaponPresets.Value);
 
+        private static string[] MiraclePresetTerms() => PresetTerms(Plugin.autoMiraclePresets.Value);
+
         private static string[] FloorPresetTerms() => PresetTerms(Plugin.autoFloorPresets.Value);
 
         private static string[] PresetTerms(string value) => (value ?? "")
@@ -2491,6 +3330,57 @@ namespace SephiriaTogether
         private static WeaponTactics GetWeaponTactics(PlayerAvatar player)
         {
             WeaponSimple weapon = player.GetComponent<WeaponControllerSimple>()?.currentWeapon;
+            if (weapon is WeaponSimple_Katana rangedSheath && rangedSheath.isBladeSheathed &&
+                player.GetCustomStatUnsafe("RANGESHEATH") > 0)
+                return Tactics("katana-ranged-sheath", PrimaryInputMode.Hold, 5f, 3.5f, 7f);
+            PrimaryAttackProfile profile = AnalyzePrimaryAttacks(weapon);
+            if (profile.HasMeleeCollision)
+            {
+                float reach = profile.ReliableMeleeReach;
+                WeaponSimple_Bow measuredBow = weapon as WeaponSimple_Bow;
+                PrimaryInputMode input = measuredBow != null
+                    ? PrimaryInputMode.ChargeRelease
+                    : PrimaryInputMode.Hold;
+                float charge = measuredBow != null
+                    ? Mathf.Max(0.15f, measuredBow.pullingTriggerTimer.time + 0.05f)
+                    : 0f;
+                WeaponTactics measured = Tactics(
+                    weapon is WeaponSimple_Crossbow ? "crossbow-short-range" :
+                    weapon?.GetType().Name + "-measured-primary",
+                    input, Mathf.Max(0.9f, reach * 0.62f),
+                    Mathf.Max(0.4f, reach * 0.3f), Mathf.Max(1.15f, reach * 0.8f), charge);
+                // A hold-to-fire weapon can retreat while firing even if its payload uses MeleeCollision.
+                measured.IsRanged = weapon != null && weapon.isRangedWeapon;
+                return measured;
+            }
+            if (profile.HasMeasuredProjectileReach)
+            {
+                float maximum = Mathf.Clamp(profile.ReliableProjectileReach * 0.82f, 3f, 16f);
+                float preferred = Mathf.Clamp(maximum * 0.72f, 2.5f, 14f);
+                WeaponSimple_Bow measuredBow = weapon as WeaponSimple_Bow;
+                PrimaryInputMode input = measuredBow != null
+                    ? PrimaryInputMode.ChargeRelease
+                    : PrimaryInputMode.Hold;
+                float charge = measuredBow != null
+                    ? Mathf.Max(0.15f, measuredBow.pullingTriggerTimer.time + 0.05f)
+                    : 0f;
+                WeaponTactics measured = Tactics(weapon.GetType().Name + "-measured-projectile", input,
+                    preferred, Mathf.Max(1f, preferred - 2f), maximum, charge);
+                measured.IsRanged = true;
+                return measured;
+            }
+            if (profile.HasProjectile)
+            {
+                WeaponSimple_Bow fallbackBow = weapon as WeaponSimple_Bow;
+                PrimaryInputMode input = fallbackBow != null
+                    ? PrimaryInputMode.ChargeRelease
+                    : PrimaryInputMode.Hold;
+                float charge = fallbackBow != null
+                    ? Mathf.Max(0.15f, fallbackBow.pullingTriggerTimer.time + 0.05f)
+                    : 0f;
+                return ScaleRangedTactics(player, Tactics(
+                    weapon.GetType().Name + "-projectile-fallback", input, 6f, 4f, 8f, charge));
+            }
             if (weapon is WeaponSimple_Bow bow)
                 return ScaleRangedTactics(player, Tactics("bow-charge", PrimaryInputMode.ChargeRelease,
                     6f, 4.5f, 8f, Mathf.Max(0.15f, bow.pullingTriggerTimer.time + 0.05f)));
@@ -2519,9 +3409,6 @@ namespace SephiriaTogether
                 return ScaleMeleeTactics(player, Tactics("greatsword", PrimaryInputMode.Hold, 1.8f, 0.8f, 2.35f));
             if (weapon is WeaponSimple_QuartterStaff)
                 return ScaleMeleeTactics(player, Tactics("quarterstaff", PrimaryInputMode.Hold, 2.15f, 1.1f, 2.8f));
-            if (weapon is WeaponSimple_Katana katana && katana.isBladeSheathed &&
-                player.GetCustomStatUnsafe("RANGESHEATH") > 0)
-                return Tactics("katana-ranged-sheath", PrimaryInputMode.Hold, 5f, 3.5f, 7f);
             if (weapon is WeaponSimple_Katana || weapon is WeaponSimple_Katana_New)
                 return ScaleMeleeTactics(player, Tactics("katana", PrimaryInputMode.Hold, 1.65f, 0.75f, 2.2f));
             if (weapon != null && (weapon.weaponType == EWeaponType.Crossbow ||
@@ -2530,6 +3417,292 @@ namespace SephiriaTogether
                 return Tactics("ranged-fallback", PrimaryInputMode.Hold, 5.5f, 4f, 7.5f);
             return ScaleMeleeTactics(player,
                 Tactics("melee-fallback", PrimaryInputMode.Hold, 1.6f, 0.7f, 2.2f));
+        }
+
+        private static WeaponTactics GetSecondaryTactics(PlayerAvatar player)
+        {
+            WeaponSimple weapon = player.GetComponent<WeaponControllerSimple>()?.currentWeapon;
+            if (weapon is WeaponSimple_Crossbow crossbow)
+            {
+                if (crossbow.specialAttackType == WeaponSimple_Crossbow.ESpecialAttackType.Minigun)
+                    return ScaleRangedTactics(player,
+                        Tactics("crossbow-minigun-secondary", PrimaryInputMode.Hold, 7f, 4.5f, 10f));
+                if (crossbow.specialAttackType == WeaponSimple_Crossbow.ESpecialAttackType.FireBullet)
+                    return ScaleRangedTactics(player,
+                        Tactics("crossbow-bullet-secondary", PrimaryInputMode.Hold, 7f, 4.5f, 10f));
+                return GetWeaponTactics(player);
+            }
+            if (weapon is WeaponSimple_GreatSword greatSword &&
+                !(greatSword.specialAttackToTransform && !greatSword.isTransformed))
+                return ScaleMeleeTactics(player,
+                    Tactics("greatsword-secondary", PrimaryInputMode.Hold, 2.5f, 0.8f, 3f));
+            if (weapon is WeaponSimple_Dagger)
+                return ScaleMeleeTactics(player,
+                    Tactics("dagger-secondary", PrimaryInputMode.Hold, 2.5f, 0.7f, 3f));
+            if (weapon is WeaponSimple_QuartterStaff staff)
+            {
+                int stackCost = KeywordDatabase.GetConstValue("staffThrowingSpearBigRequiredStack");
+                bool bigSpear = staff.enableBigThrowingSpear && stackCost > 0 &&
+                                staff.currentBigThrowingSpearStack >= stackCost;
+                if (!bigSpear && !staff.canCrystalExplosion)
+                    return ScaleMeleeTactics(player,
+                        Tactics("quarterstaff-secondary", PrimaryInputMode.Hold, 3f, 1f, 3.5f));
+            }
+            if (weapon is WeaponSimple_Katana_New)
+                return ScaleMeleeTactics(player,
+                    Tactics("katana-new-secondary", PrimaryInputMode.Hold, 2.5f, 0.75f, 3f));
+            if (weapon is WeaponSimple_Katana)
+                return ScaleMeleeTactics(player,
+                    Tactics("katana-eclipse-secondary", PrimaryInputMode.Hold, 3.4f, 1f, 4f));
+            return GetWeaponTactics(player);
+        }
+
+        private static PrimaryAttackProfile AnalyzePrimaryAttacks(WeaponSimple weapon)
+        {
+            PrimaryAttackProfile profile = new PrimaryAttackProfile { Description = "-" };
+            if (weapon == null) return profile;
+            int weaponId = weapon.GetInstanceID();
+            int weaponRange = weapon.Networkowner?.unitAvatar != null
+                ? weapon.Networkowner.unitAvatar.GetCustomStat(ECustomStat.WeaponRange)
+                : 0;
+            if (primaryProfileWeaponId == weaponId && primaryProfileWeaponRange == weaponRange &&
+                Time.unscaledTime < nextPrimaryProfileRefresh)
+                return cachedPrimaryProfile;
+            List<NewWeaponFireData> attacks = CurrentPrimaryAttacks(weapon);
+            List<float> reaches = new List<float>();
+            List<float> projectileReaches = new List<float>();
+            float rangeBonus = weaponRange / 100f;
+            foreach (NewWeaponFireData attack in attacks)
+            {
+                if (TryCalculateMeleeReach(attack, rangeBonus, out float reach))
+                {
+                    profile.HasMeleeCollision = true;
+                    reaches.Add(reach);
+                }
+                else if (TryCalculateProjectileReach(attack, out float projectileReach))
+                {
+                    profile.HasProjectile = true;
+                    profile.HasMeasuredProjectileReach = true;
+                    projectileReaches.Add(projectileReach);
+                }
+                else if (IsProjectileAttack(attack))
+                {
+                    profile.HasProjectile = true;
+                }
+            }
+            if (reaches.Count > 0) profile.ReliableMeleeReach = reaches.Min();
+            if (projectileReaches.Count > 0) profile.ReliableProjectileReach = projectileReaches.Min();
+            profile.Description = string.Join("|", attacks.Select(attack =>
+                attack != null ? attack.GetType().Name + ":" + attack.name : "null"));
+            primaryProfileWeaponId = weaponId;
+            primaryProfileWeaponRange = weaponRange;
+            nextPrimaryProfileRefresh = Time.unscaledTime + 0.2f;
+            cachedPrimaryProfile = profile;
+            return profile;
+        }
+
+        private static List<NewWeaponFireData> CurrentPrimaryAttacks(WeaponSimple weapon)
+        {
+            List<NewWeaponFireData> attacks = new List<NewWeaponFireData>();
+            PlayerAvatar owner = weapon.Networkowner?.unitAvatar as PlayerAvatar;
+            if (weapon is WeaponSimple_GreatSword greatSword)
+            {
+                int mpCost = Traverse.Create(greatSword).Field("mpBasicAttackCost").GetValue<int>();
+                bool useMpAttack = greatSword.useMPBasicAttack && owner != null &&
+                    (owner.GetCustomStatUnsafe("INFINITYMP") > 0 || owner.MP >= mpCost);
+                if (useMpAttack && greatSword.mpConsumedBasicAttack != null &&
+                    greatSword.mpConsumedBasicAttack.Any(attack => attack != null))
+                    return greatSword.mpConsumedBasicAttack.Where(attack => attack != null).Distinct().ToList();
+                if (greatSword.isTransformed || greatSword.isAlwaysTransformed)
+                {
+                    for (int i = 3; i <= 4; i++)
+                    {
+                        NewWeaponFireData transformed = null;
+                        try
+                        {
+                            transformed = greatSword.GetBasicAttack(i, "");
+                        }
+                        catch (Exception)
+                        {
+                            // A malformed/custom enhancement can expose fewer transformed attacks.
+                        }
+                        if (transformed != null && !attacks.Contains(transformed)) attacks.Add(transformed);
+                    }
+                    if (attacks.Count > 0) return attacks;
+                }
+            }
+            if (weapon is WeaponSimple_Katana katana && katana.isBladeSheathed && katana.useQuickDraw)
+            {
+                if (katana.quickDrawFireData != null) attacks.Add(katana.quickDrawFireData);
+                if (katana.greatDrawFireData != null) attacks.Add(katana.greatDrawFireData);
+                return attacks;
+            }
+            if (weapon is WeaponSimple_QuartterStaff staff)
+            {
+                if (staff.isNormalAttackRollingTurnedOn && staff.rollingFireData != null)
+                    return new List<NewWeaponFireData> { staff.rollingFireData };
+                if (staff.canCrystalExplosion && staff.crystalExplosionFireData != null)
+                    return new List<NewWeaponFireData> { staff.crystalExplosionFireData };
+            }
+            int count = Mathf.Clamp(weapon.finalComboIdx + 1, 1, 16);
+            string parameter = weapon is WeaponSimple_Crossbow crossbow && crossbow.hasCompressedAmmo
+                ? "COMPRESSEDAMMO"
+                : "";
+            for (int i = 0; i < count; i++)
+            {
+                NewWeaponFireData attack = null;
+                try
+                {
+                    attack = weapon.GetBasicAttack(i, parameter);
+                }
+                catch (Exception)
+                {
+                    // Some custom attack arrays intentionally expose fewer indices than the base combo.
+                }
+                if (attack != null && !attacks.Contains(attack)) attacks.Add(attack);
+            }
+            if (weapon is WeaponSimple_QuartterStaff doubleStaff &&
+                doubleStaff.doubleBasicComboAttacks != null)
+                foreach (NewWeaponFireData attack in doubleStaff.doubleBasicComboAttacks)
+                    if (attack != null && !attacks.Contains(attack)) attacks.Add(attack);
+            if (weapon is WeaponSimple_Crossbow iceCrossbow &&
+                iceCrossbow.Networkowner?.unitAvatar != null &&
+                iceCrossbow.Networkowner.unitAvatar.GetCustomStatUnsafe("ICECROSSBOWBUFF") > 0 &&
+                iceCrossbow.iceArrow != null)
+            {
+                attacks.Clear();
+                attacks.Add(iceCrossbow.iceArrow);
+            }
+            else if (weapon is WeaponSimple_Crossbow lightningCrossbow &&
+                     lightningCrossbow.Networkowner?.unitAvatar != null &&
+                     lightningCrossbow.Networkowner.unitAvatar.GetCustomStatUnsafe("LIGHTNINGCROSSBOW") > 0 &&
+                     lightningCrossbow.lightningArrow != null && !attacks.Contains(lightningCrossbow.lightningArrow))
+            {
+                attacks.Add(lightningCrossbow.lightningArrow);
+            }
+            return attacks;
+        }
+
+        private static bool TryCalculateMeleeReach(NewWeaponFireData attack, float rangeBonus, out float reach)
+        {
+            reach = 0f;
+            GameObject prefab = attack is NewWeaponFireData_MeleeAttack melee ? melee.projectilePrefab :
+                attack is NewWeaponFireData_SpecialProjectile special ? special.projectilePrefab : null;
+            MeleeCollision collision = prefab != null ? prefab.GetComponent<MeleeCollision>() : null;
+            if (collision == null) return false;
+            reach = CalculateMeleeReach(collision, rangeBonus);
+            return reach > 0.25f;
+        }
+
+        private static float CalculateMeleeReach(MeleeCollision collision, float rangeBonus)
+        {
+            if (collision == null) return 0f;
+            float scale = Mathf.Max(0.1f, 1f + rangeBonus);
+            if (collision is MeleeCollision_Rectangle rectangle)
+            {
+                float angle = rectangle.baseAngle * Mathf.Deg2Rad;
+                Vector2 offset = rectangle.scaleOffsetPivot ? rectangle.offset * scale : rectangle.offset;
+                Vector2 rectangleSize = rectangle.size * scale;
+                float forwardOffset = offset.x * Mathf.Sin(angle) + offset.y * Mathf.Cos(angle);
+                float forwardHalfSize = Mathf.Abs(Mathf.Sin(angle)) * rectangleSize.x * 0.5f +
+                                        Mathf.Abs(Mathf.Cos(angle)) * rectangleSize.y * 0.5f;
+                return Mathf.Max(0.5f, forwardOffset + forwardHalfSize);
+            }
+            if (collision is MeleeCollision_Capsule capsule)
+                return Mathf.Max(0.5f, capsule.offset.y + capsule.size.y * scale * 0.5f);
+            if (collision is MeleeCollision_Circle_Distance distanceCircle)
+                return distanceCircle.radius * scale;
+            if (collision is MeleeCollision_Circle circle)
+                return circle.radius * scale;
+            if (collision is MeleeCollision_WoundExplosion wound)
+                return wound.radius * scale;
+            Vector2 size = collision.GetSize(0f);
+            return Mathf.Max(size.x, size.y) * scale * 0.5f;
+        }
+
+        private static bool IsProjectileAttack(NewWeaponFireData attack)
+        {
+            if (attack is NewWeaponFireData_Bullet || attack is NewWeaponFireData_BulletSpread ||
+                attack is NewWeaponFireData_BulletBurst) return true;
+            if (attack is NewWeaponFireData_SpecialProjectile special && special.projectilePrefab != null)
+                return special.projectilePrefab.GetComponent<ProjectileBase>() != null;
+            return false;
+        }
+
+        private static bool TryCalculateProjectileReach(NewWeaponFireData attack, out float reach)
+        {
+            reach = 0f;
+            if (attack is NewWeaponFireData_BulletBurst fixedBurst && fixedBurst.arcShot)
+            {
+                reach = 5f + Mathf.Max(0f, fixedBurst.arcShotStartPositionOffset);
+                return true;
+            }
+            GameObject prefab = attack is NewWeaponFireData_Bullet bulletData ? bulletData.bulletPrefab :
+                attack is NewWeaponFireData_BulletSpread spread ? spread.bulletPrefab :
+                attack is NewWeaponFireData_BulletBurst burst ? burst.bulletPrefab :
+                attack is NewWeaponFireData_SpecialProjectile special ? special.projectilePrefab : null;
+            Bullet bullet = prefab != null ? prefab.GetComponent<Bullet>() : null;
+            if (bullet == null) return false;
+            BulletMoveModule move = bullet.MoveModule != null ? bullet.MoveModule :
+                prefab.GetComponent<BulletMoveModule>();
+            if (move is BulletMoveModule_RaycastArrow)
+            {
+                reach = 15f;
+                return true;
+            }
+            if (move is BulletMoveModule_BlinkToTargetPosition blink)
+            {
+                reach = blink.maxDistance > 0f ? blink.maxDistance : 16f;
+                return true;
+            }
+            if (move is BulletMoveModule_UniformVector2 uniform)
+            {
+                reach = move.destroyOnTime
+                    ? uniform.speed * Mathf.Max(0.1f, move.destroyTimer.time)
+                    : 16f;
+                if (uniform.waitUntilOnTime)
+                    reach = Mathf.Max(2f, reach - uniform.speed * uniform.waitingTimer.time);
+                reach = Mathf.Clamp(reach, 2f, 20f);
+                return true;
+            }
+            if (move is BulletMoveModule_FastMove || move is BulletMoveModule_Parabola)
+            {
+                reach = 16f;
+                return true;
+            }
+            if (move is BulletMoveModule_Laser laser)
+            {
+                reach = laser.maxLaserDistance;
+                if (reach <= 0.5f && bullet.attackingCollider is BoxCollider2D laserCollider)
+                    reach = Mathf.Max(laserCollider.size.x, laserCollider.size.y);
+                return reach > 0.5f;
+            }
+            if (move is BulletMoveModule_Laser_CustomBody customLaser)
+            {
+                reach = customLaser.maxLaserDistance;
+                if (reach <= 0.5f && bullet.attackingCollider is BoxCollider2D laserCollider)
+                    reach = Mathf.Max(laserCollider.size.x, laserCollider.size.y);
+                return reach > 0.5f;
+            }
+            return false;
+        }
+
+        private static bool IsWithinAttackRange(PlayerAvatar player, UnitAvatar enemy, WeaponTactics tactics)
+        {
+            if (player == null || enemy == null) return false;
+            float distance = DistanceToTarget(player, enemy);
+            // MinimumRange is a positioning preference, never a dead zone for attacking.
+            return distance <= tactics.MaximumRange;
+        }
+
+        private static float DistanceToTarget(PlayerAvatar player, UnitAvatar enemy)
+        {
+            if (player == null || enemy == null) return float.MaxValue;
+            Vector2 position = player.transform.position;
+            Collider2D collider = enemy.TopdownRigidbody?.MovementCollider;
+            if (collider != null && collider.enabled && collider.gameObject.activeInHierarchy)
+                return Vector2.Distance(position, collider.ClosestPoint(position));
+            return Vector2.Distance(position, enemy.transform.position);
         }
 
         private static bool RequiresUninterruptedPrimary(PlayerAvatar player)
@@ -2578,7 +3751,8 @@ namespace SephiriaTogether
 
         private static WeaponTactics AdjustTacticsForEnemy(WeaponTactics tactics, UnitAvatar enemy)
         {
-            if (!tactics.IsRanged || enemy == null || enemy.GetComponent<UnitAI_BossBasic>() == null)
+            if (!tactics.IsRanged || tactics.MinimumRange < 3f || enemy == null ||
+                enemy.GetComponent<UnitAI_BossBasic>() == null)
                 return tactics;
             tactics.PreferredRange = Mathf.Min(tactics.MaximumRange, tactics.PreferredRange + 1.5f);
             tactics.MinimumRange = Mathf.Min(tactics.PreferredRange - 0.5f, tactics.MinimumRange + 1.5f);
@@ -2588,7 +3762,9 @@ namespace SephiriaTogether
         private static Vector2 GetCombatMovement(PlayerAvatar player, UnitAvatar enemy, WeaponTactics tactics)
         {
             Vector2 offset = player.transform.position - enemy.transform.position;
-            float distance = offset.magnitude;
+            float centerDistance = offset.magnitude;
+            float distance = DistanceToTarget(player, enemy);
+            float targetRadius = Mathf.Max(0f, centerDistance - distance);
             bool blockedShot = tactics.IsRanged && !HasClearLineOfFire(player.transform.position,
                 enemy.transform.position);
             if (blockedShot)
@@ -2605,31 +3781,60 @@ namespace SephiriaTogether
                     combatRepositionDestination == enemy.transform.position ? 1.25f : 0.2f);
             }
             if (distance > tactics.MaximumRange)
-                return Navigate(player, enemy.transform.position, tactics.PreferredRange);
-            if (distance >= tactics.MinimumRange) return Vector2.zero;
+                return Navigate(player, enemy.transform.position, targetRadius + tactics.PreferredRange);
+            if (distance >= tactics.MinimumRange)
+            {
+                if (tactics.IsRanged && IsBossCombatTarget(enemy))
+                {
+                    if (combatRepositionTarget != enemy.netId || Time.unscaledTime >= nextCombatReposition ||
+                        (combatRepositionDestination - player.transform.position).sqrMagnitude < 0.25f)
+                    {
+                        combatRepositionTarget = enemy.netId;
+                        nextCombatReposition = Time.unscaledTime + 0.65f;
+                        Vector2 radial = offset.sqrMagnitude > 0.01f ? offset.normalized : Vector2.right;
+                        Vector2 tangent = new Vector2(-radial.y, radial.x);
+                        if (UnityEngine.Random.value < 0.5f) tangent = -tangent;
+                        Vector3 side = player.transform.position + (Vector3)(tangent * 2.5f);
+                        if (!TryReachablePointNear(player, side, out combatRepositionDestination) &&
+                            !TryReachablePointNear(player, player.transform.position - (Vector3)(tangent * 2.5f),
+                                out combatRepositionDestination))
+                            combatRepositionDestination = Vector3.zero;
+                    }
+                    if (combatRepositionDestination != Vector3.zero)
+                        return Navigate(player, combatRepositionDestination, 0.2f);
+                }
+                return Vector2.zero;
+            }
 
             if (combatRepositionTarget != enemy.netId || Time.unscaledTime >= nextCombatReposition ||
                 (combatRepositionDestination - player.transform.position).sqrMagnitude < 0.25f)
             {
                 combatRepositionTarget = enemy.netId;
                 nextCombatReposition = Time.unscaledTime + 0.3f;
-                Vector2 away = distance > 0.05f ? offset / distance : Vector2.right;
+                Vector2 away = centerDistance > 0.05f ? offset / centerDistance : Vector2.right;
                 Vector2 side = new Vector2(-away.y, away.x);
-                Vector3 preferred = enemy.transform.position + (Vector3)(away * tactics.PreferredRange);
+                Vector3 preferred = enemy.transform.position +
+                                    (Vector3)(away * (targetRadius + tactics.PreferredRange));
                 if (!TryReachablePointNear(player, preferred, out combatRepositionDestination) &&
-                    !TryReachablePointNear(player, player.transform.position + (Vector3)(side * 2f), out combatRepositionDestination))
+                    !TryReachablePointNear(player, player.transform.position + (Vector3)(side * 2.5f),
+                        out combatRepositionDestination) &&
+                    !TryReachablePointNear(player, player.transform.position - (Vector3)(side * 2.5f),
+                        out combatRepositionDestination))
                     combatRepositionDestination = player.transform.position + (Vector3)(away * 2f);
             }
             Vector2 retreat = Navigate(player, combatRepositionDestination, 0.2f);
-            if (tactics.IsRanged && enemy.GetComponent<UnitAI_BossBasic>() != null &&
-                distance < tactics.MinimumRange - 0.75f && retreat.sqrMagnitude > 0.01f &&
+            if (tactics.IsRanged && distance < tactics.MinimumRange - 0.75f && retreat.sqrMagnitude > 0.01f &&
                 Time.unscaledTime >= nextDash && player.CanMove)
             {
                 player.Dash(player.transform.position + (Vector3)(retreat.normalized * 4f));
-                nextDash = Time.unscaledTime + 0.75f;
+                nextDash = Time.unscaledTime + (IsBossCombatTarget(enemy) ? 0.75f : 1.5f);
             }
             return retreat;
         }
+
+        private static bool IsBossCombatTarget(UnitAvatar enemy) => enemy != null &&
+            (enemy.monsterType == EMonsterType.Boss || enemy is Unit_RootDemonPart ||
+             enemy.GetComponent<UnitAI_BossBasic>() != null);
 
         private static bool HasClearLineOfFire(Vector3 from, Vector3 to)
         {
@@ -2669,7 +3874,7 @@ namespace SephiriaTogether
             WeaponControllerSimple controller = player?.GetComponent<WeaponControllerSimple>();
             WeaponSimple weapon = controller?.currentWeapon;
             float distance = player != null && enemy != null
-                ? Vector2.Distance(player.transform.position, enemy.transform.position)
+                ? DistanceToTarget(player, enemy)
                 : -1f;
             string blocker = player != null && enemy != null &&
                              TryGetLineOfFireBlocker(player.transform.position, enemy.transform.position,
@@ -3002,17 +4207,23 @@ namespace SephiriaTogether
         private static void RefreshWorldObjectCache(PlayerAvatar player)
         {
             if (player == null) return;
+            bool bossFloor = IsBossFloor(player);
             if (cachedBossSpawner != null && (!cachedBossSpawner.gameObject.activeInHierarchy ||
-                cachedBossSpawner.IsCleared || cachedBossSpawner.IsBossBattleInProgress))
+                cachedBossSpawner.IsCleared))
                 cachedBossSpawner = null;
+            if (cachedSeedBossSpawner != null && !cachedSeedBossSpawner.gameObject.activeInHierarchy)
+                cachedSeedBossSpawner = null;
             if (cachedEntrance != null && !cachedEntrance.gameObject.activeInHierarchy)
                 cachedEntrance = null;
             if (cachedQuestBoard != null && !cachedQuestBoard.gameObject.activeInHierarchy)
                 cachedQuestBoard = null;
+            if (cachedMiracleSelector != null && !cachedMiracleSelector.gameObject.activeInHierarchy)
+                cachedMiracleSelector = null;
             if (worldObjectFloor == player.currentFloorGuid && Time.unscaledTime < nextWorldObjectScan) return;
             bool floorChanged = worldObjectFloor != player.currentFloorGuid;
             worldObjectFloor = player.currentFloorGuid;
-            nextWorldObjectScan = Time.unscaledTime + 5f;
+            bool resolvingMiracle = pendingMiracleResolveFloor == player.currentFloorGuid;
+            nextWorldObjectScan = Time.unscaledTime + (resolvingMiracle ? 0.25f : bossFloor ? 0.75f : 5f);
             if (floorChanged) ResetWorldObjectsOnly();
             if (cachedQuestBoard == null)
                 cachedQuestBoard = Resources.FindObjectsOfTypeAll<QuestSelectionBoard>()
@@ -3029,19 +4240,44 @@ namespace SephiriaTogether
                                         !SkippedAnvils.Contains(candidate.netId))
                     .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
                     .FirstOrDefault();
+            if (cachedMiracleSelector == null && MiraclePresetTerms().Length > 0)
+                cachedMiracleSelector = Resources.FindObjectsOfTypeAll<MiracleSelector2>()
+                    .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                        candidate.interactable != null &&
+                                        IsMiracleSelectorOnCurrentFloor(candidate, player) &&
+                                        !Traverse.Create(candidate).Property("LocalAcquired").GetValue<bool>() &&
+                                        (candidate.netId == 0 || !SkippedMiracles.Contains(candidate.netId)))
+                    .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                    .FirstOrDefault();
             if (cachedBossSpawner == null)
                 cachedBossSpawner = Resources.FindObjectsOfTypeAll<BossSpawner>()
                     .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
                                         !CompletedBossSpawners.Contains(candidate.GetInstanceID()) &&
-                                        !candidate.IsCleared && !candidate.IsBossBattleInProgress &&
-                                        candidate.bossBattleStartDetectType == BossSpawner.EBossBattleStartDetectType.Collide)
-                    .Where(candidate =>
-                    {
-                        FloorGenerator floor = candidate.parent != null ? candidate.parent : candidate.GetComponentInParent<FloorGenerator>();
-                        return floor != null && floor.guid == player.currentFloorGuid;
-                    })
+                                        !candidate.IsCleared &&
+                                        IsBossSpawnerOnCurrentFloor(candidate, player))
                     .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
                     .FirstOrDefault();
+            if (cachedSeedBossSpawner == null)
+                cachedSeedBossSpawner = Resources.FindObjectsOfTypeAll<SeedBossSpawner>()
+                    .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                        (candidate.bossObject == null || !candidate.bossObject.IsDead) &&
+                                        IsSeedBossSpawnerOnCurrentFloor(candidate, player))
+                    .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                    .FirstOrDefault();
+            if (bossFloor && cachedBossSpawner == null && Time.unscaledTime >= nextBossSpawnerDiagnostic)
+            {
+                nextBossSpawnerDiagnostic = Time.unscaledTime + 2f;
+                string candidates = string.Join("|", Resources.FindObjectsOfTypeAll<BossSpawner>()
+                    .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy)
+                    .Select(candidate => candidate.name + "@" + candidate.transform.position + "/parent=" +
+                                         (candidate.parent != null ? ShortGuid(candidate.parent.guid) : "-") +
+                                         "/detect=" + candidate.bossBattleStartDetectType)) +
+                    "|seed=" + string.Join("|", Resources.FindObjectsOfTypeAll<SeedBossSpawner>()
+                        .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy)
+                        .Select(candidate => candidate.name + "@" + candidate.transform.position));
+                Plugin.LogInfo($"AFK BossSpawner scan miss: floor={ShortGuid(player.currentFloorGuid)}, " +
+                               $"pos={player.transform.position}, candidates={candidates}");
+            }
             if (cachedEntrance == null)
             {
                 cachedEntrance = Resources.FindObjectsOfTypeAll<Interactable>()
@@ -3051,7 +4287,6 @@ namespace SephiriaTogether
                     {
                         FloorGenerator floor = candidate.GetComponentInParent<FloorGenerator>();
                         if (floor != null) return floor.guid == player.currentFloorGuid;
-                        if (IsNamedUpFloorMover(candidate)) return true;
                         PathGrid grid = PathGrid.Current;
                         return grid != null && grid.IsBuilt &&
                                grid.WorldToCell(candidate.transform.position, out int x, out int y) &&
@@ -3076,10 +4311,58 @@ namespace SephiriaTogether
             }
         }
 
+        private static bool IsBossSpawnerOnCurrentFloor(BossSpawner candidate, PlayerAvatar player)
+        {
+            if (candidate == null || player == null) return false;
+            FloorGenerator parent = candidate.parent ?? candidate.GetComponentInParent<FloorGenerator>();
+            if (parent != null && parent.guid == player.currentFloorGuid) return true;
+
+            FloorGenerator current = FloorGenerator.FindByGuid(player.currentFloorGuid);
+            if (current == null)
+                return IsBossFloor(player) &&
+                       (candidate.transform.position - player.transform.position).sqrMagnitude <= 40000f;
+            if (candidate.transform.IsChildOf(current.transform)) return true;
+
+            Vector2 lower = Vector2.Min(current.cameraBoundaryDownLeft, current.cameraBoundaryUpRight);
+            Vector2 upper = Vector2.Max(current.cameraBoundaryDownLeft, current.cameraBoundaryUpRight);
+            float width = upper.x - lower.x;
+            float height = upper.y - lower.y;
+            if (width <= 0.1f || height <= 0.1f || width > 5000f || height > 5000f) return false;
+            const float padding = 8f;
+            if (candidate.transform.position.x >= lower.x - padding &&
+                   candidate.transform.position.x <= upper.x + padding &&
+                   candidate.transform.position.y >= lower.y - padding &&
+                   candidate.transform.position.y <= upper.y + padding) return true;
+
+            // Network-spawned boss props do not always retain FloorGenerator.parent on clients.
+            return IsBossFloor(player) &&
+                   (candidate.transform.position - player.transform.position).sqrMagnitude <= 40000f;
+        }
+
+        private static bool IsMiracleSelectorOnCurrentFloor(MiracleSelector2 candidate, PlayerAvatar player)
+        {
+            if (candidate == null || player == null) return false;
+            FloorGenerator parent = candidate.GetComponentInParent<FloorGenerator>();
+            if (parent != null) return parent.guid == player.currentFloorGuid;
+            PathGrid grid = PathGrid.Current;
+            if (grid != null && grid.IsBuilt &&
+                grid.WorldToCell(candidate.transform.position, out int x, out int y) && !grid.IsBlocked(x, y))
+                return true;
+            return (candidate.transform.position - player.transform.position).sqrMagnitude <= 2500f;
+        }
+
+        private static bool IsSeedBossSpawnerOnCurrentFloor(SeedBossSpawner candidate, PlayerAvatar player)
+        {
+            if (candidate == null || player == null) return false;
+            FloorGenerator current = FloorGenerator.FindByGuid(player.currentFloorGuid);
+            if (current != null && candidate.transform.IsChildOf(current.transform)) return true;
+            return IsBossFloor(player) &&
+                   (candidate.transform.position - player.transform.position).sqrMagnitude <= 40000f;
+        }
+
         private static bool IsNextEntrance(Interactable candidate)
         {
             if (candidate == null) return false;
-            if (IsNamedUpFloorMover(candidate)) return true;
             if (candidate.GetComponent<GoToNextPlaceTogether>() != null ||
                 candidate.GetComponentInParent<GoToNextPlaceTogether>() != null ||
                 candidate.GetComponentInChildren<GoToNextPlaceTogether>(true) != null ||
@@ -3111,12 +4394,23 @@ namespace SephiriaTogether
                    candidate.GetComponentInChildren<DungeonStair_Chapter3End>(true) != null;
         }
 
-        private static bool IsNamedUpFloorMover(Interactable candidate) =>
-            candidate != null && candidate.name.StartsWith("FloorMover_", StringComparison.OrdinalIgnoreCase) &&
-            candidate.name.EndsWith("_Up", StringComparison.OrdinalIgnoreCase);
-
-        private static bool IsQuestReturnFloorMover(Interactable candidate) =>
-            candidate != null && candidate.name.StartsWith("FloorMover_Grassland_Down", StringComparison.OrdinalIgnoreCase);
+        private static bool IsQuestReturnFloorMover(PlayerAvatar player, Interactable candidate)
+        {
+            if (candidate == null) return false;
+            if (candidate.name.StartsWith("FloorMover_Grassland_Down", StringComparison.OrdinalIgnoreCase))
+                return true;
+            DungeonStair stair = candidate.GetComponent<DungeonStair>() ??
+                                 candidate.GetComponentInParent<DungeonStair>() ??
+                                 candidate.GetComponentInChildren<DungeonStair>(true);
+            FloorGenerator floor = player != null ? FloorGenerator.FindByGuid(player.currentFloorGuid) : null;
+            if (stair == null || stair.stairDir != EStairDir.Down || floor == null ||
+                !floor.isQuestObjectiveCompleted || string.IsNullOrEmpty(floor.questBoardEventId) ||
+                DungeonManager.Instance == null ||
+                !DungeonManager.Instance.generatedFloors.TryGetValue(floor.guid, out FloorData data) ||
+                !(DungeonManager.Instance.FindStage(data.stageName) is StageEntity_GrasslandTown))
+                return false;
+            return data.connectionToOtherFloors != null && data.connectionToOtherFloors.Length > 0;
+        }
 
         private static int EntrancePriority(Interactable entrance)
         {
@@ -3166,12 +4460,19 @@ namespace SephiriaTogether
         private static void ResetWorldObjectsOnly()
         {
             cachedAnvil = null;
+            cachedMiracleSelector = null;
+            pendingMiracleResolveFloor = null;
+            pendingMiracleResolveAt = 0f;
             cachedBossSpawner = null;
+            cachedSeedBossSpawner = null;
             cachedEntrance = null;
             cachedQuestBoard = null;
             entranceApproachDestination = Vector3.zero;
             entranceApproachId = 0;
             cachedReward = null;
+            bossTriggerDestination = Vector3.zero;
+            bossTriggerFloor = null;
+            bossTriggerSpawnerId = 0;
         }
 
         private static void ResetWorldObjectCache()
@@ -3179,12 +4480,19 @@ namespace SephiriaTogether
             nextWorldObjectScan = 0f;
             worldObjectFloor = null;
             cachedAnvil = null;
+            cachedMiracleSelector = null;
+            pendingMiracleResolveFloor = null;
+            pendingMiracleResolveAt = 0f;
             cachedBossSpawner = null;
+            cachedSeedBossSpawner = null;
             cachedEntrance = null;
             cachedQuestBoard = null;
             entranceApproachDestination = Vector3.zero;
             entranceApproachId = 0;
             cachedReward = null;
+            bossTriggerDestination = Vector3.zero;
+            bossTriggerFloor = null;
+            bossTriggerSpawnerId = 0;
         }
 
         private static void ReleaseDefense(PlayerAvatar player)
@@ -3199,7 +4507,7 @@ namespace SephiriaTogether
         }
 
         private static bool TryUseCombatAbility(PlayerAvatar player, UnitAvatar enemy, Vector2 toEnemy,
-            WeaponTactics tactics)
+            WeaponTactics tactics, bool allowWeaponSecondary)
         {
             if (heldCombatAbility >= 0) return true;
             if (Time.unscaledTime < nextCombatAbility) return false;
@@ -3221,7 +4529,7 @@ namespace SephiriaTogether
 
             WeaponSimple currentWeapon = player.GetComponent<WeaponControllerSimple>()?.currentWeapon;
             if (RequiresUninterruptedPrimary(player)) return false;
-            if (TryUseWeaponSpecial(player, enemy, actions, distanceSquared)) return true;
+            if (allowWeaponSecondary && TryUseWeaponSpecial(player, enemy, actions, distanceSquared, tactics)) return true;
             if (attackHeld && (currentWeapon is WeaponSimple_Crossbow ||
                                currentWeapon is WeaponSimple_Staff ||
                                currentWeapon is WeaponSimple_Golem))
@@ -3245,7 +4553,7 @@ namespace SephiriaTogether
                 return true;
             }
 
-            if (distanceSquared <= 64f)
+            if (allowWeaponSecondary && distanceSquared <= 64f)
             {
                 WeaponControllerSimple weaponController = player.GetComponent<WeaponControllerSimple>();
                 if (weaponController?.currentWeapon is WeaponSimple_SwordAndShield ||
@@ -3273,8 +4581,128 @@ namespace SephiriaTogether
             return false;
         }
 
+        private static bool TryUsePreferredSecondary(PlayerAvatar player, UnitAvatar enemy, Vector2 toEnemy,
+            WeaponTactics tactics)
+        {
+            if (!PrefersSecondaryAttack() || player == null || enemy == null) return false;
+            if (heldCombatAbility >= 0) return true;
+            WeaponControllerSimple controller = player.GetComponent<WeaponControllerSimple>();
+            WeaponSimple weapon = controller?.currentWeapon;
+            if (weapon == null || !HasSecondaryAttack(weapon)) return false;
+
+            int mpCost = GetSecondaryMpCost(player, weapon);
+            if (player.GetCustomStatUnsafe("INFINITYMP") <= 0 && player.MP < mpCost) return false;
+            if (Time.unscaledTime < nextCombatAbility) return false;
+
+            IntegratedActionController actions = player.GetComponent<IntegratedActionController>();
+            if (actions == null) return false;
+            if (TryUseWeaponSpecial(player, enemy, actions, toEnemy.sqrMagnitude, tactics)) return true;
+
+            // Known weapon specials have additional vanilla state/resource gates in TryUseWeaponSpecial.
+            if (!(weapon is WeaponSimple_SwordAndShield)) return false;
+            if (controller.currentWeaponSwing >= 0 || attackHeld)
+            {
+                ReleaseAttack(player);
+                return true;
+            }
+            LockAim(player, enemy.transform.position, enemy);
+            actions.Cast(101, enemy.transform.position, enemy);
+            heldCombatAbility = 101;
+            releaseCombatAbilityAt = Time.unscaledTime + 0.25f;
+            nextCombatAbility = Time.unscaledTime + 0.3f;
+            return true;
+        }
+
+        private static bool ShouldUsePreferredSecondary(PlayerAvatar player)
+        {
+            if (!PrefersSecondaryAttack() || player == null) return false;
+            if (heldCombatAbility >= 0) return true;
+            WeaponControllerSimple controller = player.GetComponent<WeaponControllerSimple>();
+            WeaponSimple weapon = controller?.currentWeapon;
+            if (weapon == null || !HasSecondaryAttack(weapon) || Time.unscaledTime < nextCombatAbility) return false;
+            bool infiniteMp = player.GetCustomStatUnsafe("INFINITYMP") > 0;
+
+            if (weapon is WeaponSimple_Crossbow crossbow)
+            {
+                if (!infiniteMp && player.MP < crossbow.SpecialAttackCost) return false;
+                switch (crossbow.specialAttackType)
+                {
+                    case WeaponSimple_Crossbow.ESpecialAttackType.FastReload:
+                        return !crossbow.isReloading && crossbow.ammoInCurrentMagazine <=
+                               Mathf.Max(1, crossbow.currentMagazineCapacity / 3);
+                    case WeaponSimple_Crossbow.ESpecialAttackType.IceBuff:
+                        return crossbow.iceBuffCoolDownTimer.Check();
+                    case WeaponSimple_Crossbow.ESpecialAttackType.AmmoCompression:
+                        return !crossbow.isReloading && !crossbow.hasCompressedAmmo &&
+                               crossbow.ammoInCurrentMagazine > 1;
+                    default:
+                        return true;
+                }
+            }
+            if (weapon is WeaponSimple_GreatSword greatSword)
+                return !(greatSword.specialAttackToTransform && greatSword.isTransformed) &&
+                       (greatSword.moneyWhirlwind || infiniteMp || player.MP >= greatSword.SweepCost);
+            if (weapon is WeaponSimple_Dagger dagger)
+                return dagger.currentFury > 0 && (infiniteMp || player.MP >= dagger.FuryCost);
+            if (weapon is WeaponSimple_QuartterStaff staff)
+            {
+                int stackCost = KeywordDatabase.GetConstValue("staffThrowingSpearBigRequiredStack");
+                bool freeSpecial = staff.canCrystalExplosion || staff.enableBigThrowingSpear && stackCost > 0 &&
+                                   staff.currentBigThrowingSpearStack >= stackCost;
+                return freeSpecial || infiniteMp || player.MP >= staff.SpecialAttackCost;
+            }
+            if (weapon is WeaponSimple_Katana_New newKatana)
+                return controller.currentWeaponSwing >= 0 &&
+                       (infiniteMp || player.MP >= newKatana.SpecialAttackCost);
+            if (weapon is WeaponSimple_Katana katana)
+                return katana.sheathActionType == WeaponSimple_Katana.ESheathActionType.Eclipse &&
+                       !katana.isEclipseBuffActivated && (infiniteMp || player.MP >= katana.SpecialAttackCost);
+            return weapon is WeaponSimple_SwordAndShield &&
+                   (infiniteMp || player.MP >= GetSecondaryMpCost(player, weapon));
+        }
+
+        private static bool HasSecondaryAttack(WeaponSimple weapon)
+        {
+            return weapon is WeaponSimple_Crossbow || weapon is WeaponSimple_GreatSword ||
+                   weapon is WeaponSimple_Dagger || weapon is WeaponSimple_QuartterStaff ||
+                   weapon is WeaponSimple_Katana || weapon is WeaponSimple_Katana_New ||
+                   weapon is WeaponSimple_SwordAndShield;
+        }
+
+        private static bool AllowsPrimaryAttack() => Plugin.autoAttackMode.Value != 3;
+
+        private static bool AllowsSecondaryAttack() => Plugin.autoAttackMode.Value != 2;
+
+        private static bool PrefersSecondaryAttack() =>
+            Plugin.autoAttackMode.Value == 1 || Plugin.autoAttackMode.Value == 3;
+
+        private static bool IsSecondaryOnlyMode() => Plugin.autoAttackMode.Value == 3;
+
+        private static bool HasEnoughMp(PlayerAvatar player, float cost) =>
+            player != null && (player.GetCustomStatUnsafe("INFINITYMP") > 0 || player.MP >= cost);
+
+        private static int GetSecondaryMpCost(PlayerAvatar player, WeaponSimple weapon)
+        {
+            if (weapon is WeaponSimple_Crossbow crossbow)
+                return Mathf.CeilToInt(crossbow.SpecialAttackCost);
+            if (weapon is WeaponSimple_GreatSword greatSword)
+                return greatSword.moneyWhirlwind ? 0 : greatSword.SweepCost;
+            if (weapon is WeaponSimple_Dagger dagger)
+                return dagger.currentFury > 0 ? dagger.FuryCost : dagger.ParryCost;
+            if (weapon is WeaponSimple_QuartterStaff staff)
+            {
+                int stackCost = KeywordDatabase.GetConstValue("staffThrowingSpearBigRequiredStack");
+                if (staff.canCrystalExplosion || staff.enableBigThrowingSpear && stackCost > 0 &&
+                    staff.currentBigThrowingSpearStack >= stackCost) return 0;
+                return staff.SpecialAttackCost;
+            }
+            if (weapon is WeaponSimple_Katana katana) return katana.SpecialAttackCost;
+            if (weapon is WeaponSimple_Katana_New newKatana) return newKatana.SpecialAttackCost;
+            return 0;
+        }
+
         private static bool TryUseWeaponSpecial(PlayerAvatar player, UnitAvatar enemy,
-            IntegratedActionController actions, float distanceSquared)
+            IntegratedActionController actions, float distanceSquared, WeaponTactics tactics)
         {
             WeaponControllerSimple controller = player.GetComponent<WeaponControllerSimple>();
             WeaponSimple weapon = controller?.currentWeapon;
@@ -3286,7 +4714,7 @@ namespace SephiriaTogether
             float cooldown = 1.5f;
             if (weapon is WeaponSimple_Crossbow crossbow)
             {
-                if (player.MP < crossbow.SpecialAttackCost) return false;
+                if (!HasEnoughMp(player, crossbow.SpecialAttackCost)) return false;
                 switch (crossbow.specialAttackType)
                 {
                     case WeaponSimple_Crossbow.ESpecialAttackType.FastReload:
@@ -3304,7 +4732,11 @@ namespace SephiriaTogether
                         cooldown = 1.5f;
                         break;
                     case WeaponSimple_Crossbow.ESpecialAttackType.Minigun:
-                        if (distanceSquared < 20.25f || player.MP < Mathf.Max(5f, crossbow.SpecialAttackCost * 5f))
+                        float requiredMp = PrefersSecondaryAttack()
+                            ? crossbow.SpecialAttackCost
+                            : Mathf.Max(5f, crossbow.SpecialAttackCost * 5f);
+                        if (distanceSquared < tactics.MinimumRange * tactics.MinimumRange ||
+                            !HasEnoughMp(player, requiredMp))
                             return false;
                         holdTime = 2.5f;
                         cooldown = 3f;
@@ -3318,8 +4750,8 @@ namespace SephiriaTogether
             {
                 bool needsTransform = greatSword.specialAttackToTransform && !greatSword.isTransformed;
                 if (greatSword.specialAttackToTransform && greatSword.isTransformed) return false;
-                if (!needsTransform && distanceSquared > 9f ||
-                    !greatSword.moneyWhirlwind && player.MP < greatSword.SweepCost)
+                if (!needsTransform && distanceSquared > tactics.MaximumRange * tactics.MaximumRange ||
+                    !greatSword.moneyWhirlwind && !HasEnoughMp(player, greatSword.SweepCost))
                     return false;
                 if (controller.currentWeaponSwing >= 0 || attackHeld)
                 {
@@ -3340,7 +4772,8 @@ namespace SephiriaTogether
             }
             else if (weapon is WeaponSimple_Dagger dagger)
             {
-                if (dagger.currentFury <= 0 || player.MP < dagger.FuryCost || distanceSquared > 9f) return false;
+                if (dagger.currentFury <= 0 || !HasEnoughMp(player, dagger.FuryCost) ||
+                    distanceSquared > tactics.MaximumRange * tactics.MaximumRange) return false;
                 if (controller.currentWeaponSwing >= 0 || attackHeld)
                     return QueueWeaponSpecial(player, controller, weapon, pending, "dagger-fury");
                 cooldown = 0.7f;
@@ -3350,8 +4783,9 @@ namespace SephiriaTogether
                 int stackCost = KeywordDatabase.GetConstValue("staffThrowingSpearBigRequiredStack");
                 bool bigSpear = staff.enableBigThrowingSpear && stackCost > 0 &&
                                 staff.currentBigThrowingSpearStack >= stackCost;
-                if (!bigSpear && !staff.canCrystalExplosion && player.MP < staff.SpecialAttackCost) return false;
-                if (!bigSpear && distanceSquared > 12.25f) return false;
+                if (!bigSpear && !staff.canCrystalExplosion && !HasEnoughMp(player, staff.SpecialAttackCost))
+                    return false;
+                if (!bigSpear && distanceSquared > tactics.MaximumRange * tactics.MaximumRange) return false;
                 if (controller.currentWeaponSwing >= 0 || attackHeld)
                     return QueueWeaponSpecial(player, controller, weapon, pending,
                         bigSpear ? "staff-big-spear" : "staff-special");
@@ -3359,14 +4793,16 @@ namespace SephiriaTogether
             }
             else if (weapon is WeaponSimple_Katana_New newKatana)
             {
-                if (controller.currentWeaponSwing < 0 || player.MP < newKatana.SpecialAttackCost ||
-                    distanceSquared > 9f) return false;
+                if (controller.currentWeaponSwing < 0 || !HasEnoughMp(player, newKatana.SpecialAttackCost) ||
+                    distanceSquared > tactics.MaximumRange * tactics.MaximumRange) return false;
                 cooldown = 1f;
             }
             else if (weapon is WeaponSimple_Katana katana)
             {
                 if (katana.sheathActionType != WeaponSimple_Katana.ESheathActionType.Eclipse ||
-                    katana.isEclipseBuffActivated || distanceSquared > 16f) return false;
+                    katana.isEclipseBuffActivated || !HasEnoughMp(player, katana.SpecialAttackCost) ||
+                    distanceSquared > tactics.MaximumRange * tactics.MaximumRange)
+                    return false;
                 if (controller.currentWeaponSwing >= 0 || attackHeld)
                     return QueueWeaponSpecial(player, controller, weapon, pending, "katana-eclipse");
                 cooldown = 2f;
@@ -3431,6 +4867,14 @@ namespace SephiriaTogether
             if (weapon == null) return;
             float attackSpeed = player.GetCustomStat(ECustomStat.AttackSpeed);
             float fixedSpeed = player.GetCustomStatUnsafe("FIXEDATTACKSPEED");
+            PrimaryAttackProfile profile = AnalyzePrimaryAttacks(weapon);
+            string primaryReach = $", activePrimary={profile.Description}" +
+                (profile.HasMeleeCollision
+                    ? $", meleePrimaryReach={profile.ReliableMeleeReach:0.00}"
+                    : "") +
+                (profile.HasMeasuredProjectileReach
+                    ? $", projectilePrimaryReach={profile.ReliableProjectileReach:0.00}"
+                    : profile.HasProjectile ? ", projectilePrimaryReach=fallback" : "");
             string extra = weapon is WeaponSimple_GreatSword greatSword
                 ? $", transform={greatSword.specialAttackToTransform}/{greatSword.isTransformed}, " +
                   $"always={greatSword.isAlwaysTransformed}, sweep={greatSword.sweepTimer.time:0.00}/{greatSword.SweepCost}, " +
@@ -3447,7 +4891,7 @@ namespace SephiriaTogether
                            $"heldAbility={heldCombatAbility}, mp={player.MP}, " +
                            $"specialUsesAttackSpeed={weapon.specialAttackIsRelatedToAttackSpeed}, " +
                            $"basic={DescribeFireData(weapon.basicComboAttacks)}, special={DescribeFireData(weapon.specialAttacks)}, " +
-                           $"addons={DescribeWeaponAddons(weapon)}{extra}.");
+                            $"addons={DescribeWeaponAddons(weapon)}{primaryReach}{extra}.");
         }
 
         private static bool CanUseQuickSlot(PlayerAvatar player, QuickSlotData slot)
@@ -3490,11 +4934,18 @@ namespace SephiriaTogether
                 Time.unscaledTime >= nextPathCalculation)
             {
                 CurrentPath.Clear();
+                pathIndex = 0;
+                pathStartsFromBlockedCell = false;
                 if (PathFinder.Find(grid, player.transform.position, destination, CurrentPath))
                 {
-                    PathSmoother.Smooth(grid, CurrentPath);
-                    pathIndex = CurrentPath.Count > 1 ? 1 : 0;
+                    if (Time.unscaledTime >= pathSmoothingSuppressedUntil)
+                        PathSmoother.Smooth(grid, CurrentPath);
+                    pathStartsFromBlockedCell = grid.WorldToCell(player.transform.position,
+                        out int startX, out int startY) && grid.IsBlocked(startX, startY);
+                    pathIndex = pathStartsFromBlockedCell ? 0 : CurrentPath.Count > 1 ? 1 : 0;
                     pathDestination = destination;
+                    if (pathStartsFromBlockedCell && CurrentPath.Count > 0)
+                        LogPathDiagnostic($"blocked-start-recovery-via-{CurrentPath[0]}", player, destination);
                 }
                 else LogPathDiagnostic("no-path", player, destination);
                 nextPathCalculation = Time.unscaledTime + 0.5f;
@@ -3504,15 +4955,20 @@ namespace SephiriaTogether
             {
                 if ((player.transform.position - lastPathPosition).sqrMagnitude < 0.01f)
                 {
+                    LogPathDiagnostic("stuck-repath-without-smoothing", player, destination);
                     CurrentPath.Clear();
+                    pathIndex = 0;
+                    pathStartsFromBlockedCell = false;
                     nextPathCalculation = 0f;
+                    pathSmoothingSuppressedUntil = Time.unscaledTime + 3f;
                 }
                 lastPathPosition = player.transform.position;
                 nextStuckCheck = Time.unscaledTime + 1f;
             }
 
             while (pathIndex < CurrentPath.Count &&
-                   (CurrentPath[pathIndex] - player.transform.position).sqrMagnitude < 0.25f)
+                   (CurrentPath[pathIndex] - player.transform.position).sqrMagnitude <
+                   (pathStartsFromBlockedCell && pathIndex == 0 ? 0.04f : 0.25f))
                 pathIndex++;
             if (pathIndex >= CurrentPath.Count) return Vector2.zero;
             Vector2 direction = ((Vector2)(CurrentPath[pathIndex] - player.transform.position)).normalized;
@@ -3528,10 +4984,13 @@ namespace SephiriaTogether
             lastDiagnosticState = state;
             nextDiagnosticHeartbeat = Time.unscaledTime + 3f;
             PathGrid grid = PathGrid.Current;
-            WeaponTactics tactics = AdjustTacticsForEnemy(GetWeaponTactics(player), enemy);
+            bool preferSecondary = ShouldUsePreferredSecondary(player);
+            WeaponTactics tactics = AdjustTacticsForEnemy(
+                preferSecondary ? GetSecondaryTactics(player) : GetWeaponTactics(player), enemy);
             Plugin.LogInfo($"AFK status: action={action}, player={player.Name}, floor={ShortGuid(player.currentFloorGuid)}, " +
-                            $"pos={player.transform.position}, enemy={DescribeUnit(enemy)}, move={movement}, " +
-                            $"weapon={tactics.Name}, range={tactics.MinimumRange:0.0}-{tactics.MaximumRange:0.0}, " +
+                             $"pos={player.transform.position}, enemy={DescribeUnit(enemy)}, move={movement}, " +
+                             $"weapon={tactics.Name}, attack={(preferSecondary ? "secondary" : "primary")}, " +
+                             $"range={tactics.MinimumRange:0.0}-{tactics.MaximumRange:0.0}, " +
                             $"attackHeld={attackHeld}/{(attackHeld ? Time.unscaledTime - attackHeldSince : 0f):0.0}s, " +
                             $"peers={DescribePeerFloors(player)}, " +
                             $"input={player.localDataStorage.currentInput}/{player.localDataStorage.isInputReceived}, " +
@@ -3582,6 +5041,8 @@ namespace SephiriaTogether
             pathDestination = Vector3.zero;
             nextPathCalculation = 0f;
             nextStuckCheck = 0f;
+            pathStartsFromBlockedCell = false;
+            pathSmoothingSuppressedUntil = 0f;
         }
 
         private static void ReleaseAttack(PlayerAvatar player)
@@ -3649,6 +5110,14 @@ namespace SephiriaTogether
     internal static class AutoPilotWeaponCancelPatch
     {
         private static void Prefix(WeaponSimple __instance) => AutoPilot.NotifyWeaponActionCancelled(__instance);
+    }
+
+    [HarmonyPatch(typeof(UI_MiraclePanel), nameof(UI_MiraclePanel.SetController))]
+    internal static class AutoPilotMiracleOfferPatch
+    {
+        private static void Postfix(UI_MiraclePanel __instance, MiracleController miracleController,
+            MiracleMetadata[] miracles, MiracleSelector2 miracleSelector) =>
+            AutoPilot.ObserveMiracleOffer(__instance, miracleController, miracles, miracleSelector);
     }
 
     [HarmonyPatch(typeof(WeaponControllerSimple), nameof(WeaponControllerSimple.AttackButtonDown))]
@@ -3776,7 +5245,27 @@ namespace SephiriaTogether
     internal static class AutoPilotEllipseWarningPatch
     {
         private static void Postfix(Vector3 to, Color color, float radius, float time, UI_AOEWarning __result) =>
-            AutoPilot.RegisterHostileAoe(__result, to, radius + 1.35f, time, color);
+            AutoPilot.RegisterHostileEllipse(__result, to, radius, time, color);
+    }
+
+    [HarmonyPatch(typeof(Unit_RootDemonPart), "UserCode_RpcCreateTooCloserToTargetWarning")]
+    internal static class AutoPilotRootDemonCloseWarningPatch
+    {
+        private static void Postfix(Unit_RootDemonPart __instance) =>
+            AutoPilot.RegisterRootDemonCloseWarning(__instance);
+    }
+
+    [HarmonyPatch(typeof(Unit_MoleBigBomb), "UserCode_RpcBombPunch__Vector2__Boolean")]
+    internal static class AutoPilotMoleBigBombPunchPatch
+    {
+        private static void Postfix(Unit_MoleBigBomb __instance, Vector2 targetPosition, bool opposite) =>
+            AutoPilot.RegisterMoleBigBombPunch(__instance, targetPosition, opposite);
+    }
+
+    [HarmonyPatch(typeof(Unit_MoleBigBomb), "UserCode_RpcMissileDown__Vector2__Single__Boolean")]
+    internal static class AutoPilotMoleBigBombMissilePatch
+    {
+        private static void Postfix(Vector2 position) => AutoPilot.RegisterMoleBigBombMissile(position);
     }
 
     [HarmonyPatch(typeof(AOEWarningFactory), nameof(AOEWarningFactory.CreateAoe_RangeAttackLine))]
@@ -3811,6 +5300,13 @@ namespace SephiriaTogether
         private static void Postfix(Vector3 position, Vector2 size, float angle, float time, Color color,
             UI_AOEWarning_MeleeAttackLine __result) =>
             AutoPilot.RegisterHostileBox(__result, position, size, angle, time, color);
+    }
+
+    [HarmonyPatch(typeof(Unit_SpikeEye), "RpcCreateAttackWarning")]
+    internal static class AutoPilotSpikeEyeWarningPatch
+    {
+        private static void Postfix(Unit_SpikeEye __instance, Vector2 attackDir) =>
+            AutoPilot.RegisterSpikeEyeMeleeWarning(__instance, attackDir);
     }
 
     [HarmonyPatch(typeof(AOEWarningFactory), nameof(AOEWarningFactory.CreateAoe_MeleeAttackLine_Windmill))]
