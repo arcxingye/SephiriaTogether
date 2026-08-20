@@ -17,7 +17,9 @@ namespace SephiriaTogether
             __state = new State();
             if (!NetworkServer.active || !Plugin.friendlyFire.Value ||
                 !(__instance is PlayerAvatar) || !(damage?.origin is PlayerAvatar attacker) ||
-                attacker == __instance || damage.isSystemDamage)
+                attacker == __instance || damage.isSystemDamage ||
+                CloneBotManager.IsBot(attacker.spawner) ||
+                CloneBotManager.IsBot((__instance as PlayerAvatar)?.spawner))
             {
                 return;
             }
@@ -53,13 +55,29 @@ namespace SephiriaTogether
         }
     }
 
+    [HarmonyPatch(typeof(UnitAvatar), nameof(UnitAvatar.ApplyDamage))]
+    internal static class CloneBotDamageBoundaryPatch
+    {
+        private static bool Prefix(UnitAvatar __instance, DamageInstance damage, ref EApplyDamageResult __result)
+        {
+            PlayerAvatar target = __instance as PlayerAvatar;
+            PlayerAvatar attacker = damage?.origin as PlayerAvatar;
+            if (target == null || attacker == null ||
+                (!CloneBotManager.IsBot(target.spawner) && !CloneBotManager.IsBot(attacker.spawner)))
+                return true;
+            __result = EApplyDamageResult.Fail_Absolute;
+            return false;
+        }
+    }
+
     [HarmonyPatch(typeof(PlayerAvatar), "HandleBeforeAttack")]
     internal static class FriendlyFireRelationPatch
     {
         private static bool Prefix(UnitAvatar target, DamageInstance damage)
         {
             if (Plugin.friendlyFire.Value && target is PlayerAvatar victim &&
-                damage?.origin is PlayerAvatar attacker && attacker != victim)
+                damage?.origin is PlayerAvatar attacker && attacker != victim &&
+                !CloneBotManager.IsBot(attacker.spawner) && !CloneBotManager.IsBot(victim.spawner))
             {
                 damage.failed = EDamageFailType.None;
                 return false;
@@ -70,7 +88,8 @@ namespace SephiriaTogether
         private static void Postfix(UnitAvatar target, DamageInstance damage)
         {
             if (Plugin.friendlyFire.Value && target is PlayerAvatar victim &&
-                damage?.origin is PlayerAvatar attacker && attacker != victim)
+                damage?.origin is PlayerAvatar attacker && attacker != victim &&
+                !CloneBotManager.IsBot(attacker.spawner) && !CloneBotManager.IsBot(victim.spawner))
             {
                 damage.failed = EDamageFailType.None;
             }

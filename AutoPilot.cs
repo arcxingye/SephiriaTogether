@@ -95,9 +95,30 @@ namespace SephiriaTogether
         private static float nextQuestObjectiveLog;
         private static float nextInventorySignatureCheck;
         private static float nextInventoryArrangeAllowed;
+        private static string manualArrangeStatus;
         private static Vector3 entranceApproachDestination;
         private static int entranceApproachId;
         private static float nextEntranceApproachSearch;
+        private static string battleTriggerFloor;
+        private static int battleTriggerId;
+        private static Vector3 battleTriggerDestination;
+        private static float nextBattleTriggerSearch;
+        private static string battlePathRefreshFloor;
+        private static float battlePathRefreshAt;
+        private static string battlePathRefreshCompletedFloor;
+        private static float nextFloorClearDiagnostic;
+        private static float refreshDoorPathsUntil;
+        private static float nextDoorPathRefresh;
+        private static RoomDoor pendingDoorPathRefresh;
+        private static string pendingBattleTriggerCacheFloor;
+        private static float nextPendingBattleTriggerScan;
+        private static readonly List<BattleTriggerCandidate> CachedPendingBattleTriggers =
+            new List<BattleTriggerCandidate>();
+        private static string lastBattleAreaFloor;
+        private static Vector2 lastBattleAreaLower;
+        private static Vector2 lastBattleAreaUpper;
+        private static Vector3 lastBattleEntryPoint;
+        private static Vector3 battleExitDestination;
         private static readonly HashSet<int> StartedBossSpawners = new HashSet<int>();
         private static UnitAvatar cachedEnemy;
         private static float nextEnemySearch;
@@ -108,6 +129,11 @@ namespace SephiriaTogether
         private static float enemyProgressHp;
         private static float nextEnemyProgressCheck;
         private static int enemyStuckChecks;
+        private static string lastDiagnosticAction;
+        private static uint lastDiagnosticEnemyNetId;
+        private static bool lastDiagnosticMoving;
+        private static bool diagnosticStateInitialized;
+        private static GUIStyle bannerStyle;
         private static Vector2 lastAppliedMovement;
         private static bool movementApplied;
         private static bool runningRequested;
@@ -139,6 +165,7 @@ namespace SephiriaTogether
         private static readonly Dictionary<uint, float> UnreachableRescues = new Dictionary<uint, float>();
         private static readonly List<Vector3> RescuePath = new List<Vector3>();
         private static readonly List<Vector3> BossTriggerPath = new List<Vector3>();
+        private static readonly List<Vector3> BattleTriggerPath = new List<Vector3>();
         private static readonly List<Vector3> AoeEscapePath = new List<Vector3>();
         private static readonly List<AoeThreat> ActiveAoeThreats = new List<AoeThreat>();
         private static AoeThreat activeAoeEscape;
@@ -186,6 +213,21 @@ namespace SephiriaTogether
         private static readonly HashSet<uint> EnabledPlayers = new HashSet<uint>();
 
         internal static bool Enabled => enabled;
+        internal static string ManualArrangeStatus => manualArrangeStatus;
+        internal static bool CanManualArrangeInventory
+        {
+            get
+            {
+                PlayerAvatar player = LocalPlayer();
+                GridInventory inventory = player?.Inventory;
+                return player != null && !player.IsDead && !player.IsInBattle && inventory != null &&
+                       player.localDataStorage != null && !player.localDataStorage.preparingUIThings &&
+                       (UIManager.Instance == null || UIManager.Instance.CurrentControlStack == null) &&
+                       !SaveManagement.IsBusy &&
+                       SaveManager.IsSaving == SaveManager.ESaveState.None &&
+                       inventory.CurrentInventoryStorage > 1 && inventory.charms.Count > 0;
+            }
+        }
 
         private sealed class AoeThreat
         {
@@ -200,6 +242,16 @@ namespace SephiriaTogether
             internal float CreatedAt;
             internal float WarningTime;
             internal float ActiveUntil;
+        }
+
+        private sealed class BattleTriggerCandidate
+        {
+            internal Component Source;
+            internal string Name;
+            internal Vector2 Lower;
+            internal Vector2 Upper;
+            internal bool NeedsEntry;
+            internal bool Started;
         }
 
         private enum AoeShape { Circle, Ellipse, Segment, Box }
@@ -286,9 +338,9 @@ namespace SephiriaTogether
                 return;
             }
 
+            RefreshBattleDoorPathGrid(player);
             LogWeaponProfile(player);
-            bool teammateAhead = FindConnectedForwardTeammate(player) != null;
-            UnitAvatar enemy = teammateAhead ? null : FindEnemy(player);
+            UnitAvatar enemy = FindEnemy(player);
             PlayerAvatar leader = FollowTarget(player);
             Vector2 movement = Vector2.zero;
             string action = "idle";
@@ -386,6 +438,16 @@ namespace SephiriaTogether
                     action = "boss-trigger";
                     movement = bossMovement;
                 }
+                else if (TryLeaveClearedBattleArea(player, out Vector2 battleExitMovement))
+                {
+                    action = "battle-exit";
+                    movement = battleExitMovement;
+                }
+                else if (TryApproachPendingBattleTrigger(player, out Vector2 battleMovement))
+                {
+                    action = "battle-trigger";
+                    movement = battleMovement;
+                }
                 else if (TryHandleFloorReward(player, out Vector2 rewardMovement))
                 {
                     action = "reward";
@@ -445,15 +507,20 @@ namespace SephiriaTogether
         internal static void Draw()
         {
             if (!enabled) return;
-            GUIStyle style = new GUIStyle(GUI.skin.box)
+            if (bannerStyle == null)
             {
-                alignment = TextAnchor.MiddleCenter,
-                fontSize = 16,
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = Color.white }
-            };
-            GUI.Box(new Rect(Screen.width * 0.5f - 130f, 18f, 260f, 34f),
-                string.Format(MenuText.Get("AutoPilotBanner"), Plugin.autoPilotShortcut.Value), style);
+                bannerStyle = new GUIStyle(GUI.skin.box)
+                {
+                    alignment = TextAnchor.MiddleCenter,
+                    fontSize = 16,
+                    fontStyle = FontStyle.Bold
+                };
+                bannerStyle.normal.textColor = Color.white;
+            }
+            string banner = Plugin.IsShortcutBound(Plugin.autoPilotShortcut.Value)
+                ? string.Format(MenuText.Get("AutoPilotBanner"), Plugin.FormatShortcut(Plugin.autoPilotShortcut.Value))
+                : MenuText.Get("AutoPilotBannerMenu");
+            GUI.Box(new Rect(Screen.width * 0.5f - 130f, 18f, 260f, 34f), banner, bannerStyle);
         }
 
         internal static bool IsFavorite(int itemId) =>
@@ -470,6 +537,18 @@ namespace SephiriaTogether
             entranceApproachDestination = Vector3.zero;
             entranceApproachId = 0;
             nextEntranceApproachSearch = 0f;
+            ResetBattleTrigger();
+            battlePathRefreshFloor = null;
+            battlePathRefreshAt = 0f;
+            battlePathRefreshCompletedFloor = null;
+            nextFloorClearDiagnostic = 0f;
+            refreshDoorPathsUntil = 0f;
+            nextDoorPathRefresh = 0f;
+            pendingDoorPathRefresh = null;
+            pendingBattleTriggerCacheFloor = null;
+            nextPendingBattleTriggerScan = 0f;
+            CachedPendingBattleTriggers.Clear();
+            ResetBattleAreaExit();
             nextCombatAbility = 0f;
             weaponSpecialPendingUntil = 0f;
             pendingWeaponSpecialId = 0;
@@ -488,6 +567,7 @@ namespace SephiriaTogether
             nextInventorySignatureCheck = 0f;
             arrangeInventoryAt = 0f;
             nextInventoryArrangeAllowed = 0f;
+            manualArrangeStatus = null;
             nextRewardAction = 0f;
             attackHeld = false;
             attackHeldSince = 0f;
@@ -585,6 +665,10 @@ namespace SephiriaTogether
             ResetWorldObjectCache();
             ResetPath();
             lastDiagnosticState = null;
+            lastDiagnosticAction = null;
+            lastDiagnosticEnemyNetId = 0;
+            lastDiagnosticMoving = false;
+            diagnosticStateInitialized = false;
             nextDiagnosticHeartbeat = 0f;
             nextDiagnosticChangeLog = 0f;
             lastPathDiagnostic = null;
@@ -884,7 +968,7 @@ namespace SephiriaTogether
         {
             bool invalid = cachedEnemy == null || IsExcludedCombatTarget(cachedEnemy) || cachedEnemy.IsDead ||
                            !cachedEnemy.canBeTarget.IsTrue() ||
-                           (cachedEnemy.transform.position - player.transform.position).sqrMagnitude > 2500f ||
+                           !IsUnitOnCurrentFloor(player, cachedEnemy) ||
                            UnreachableEnemies.TryGetValue(cachedEnemy.netId, out float retryAt) &&
                            Time.unscaledTime < retryAt;
             if (invalid || Time.unscaledTime >= nextEnemySearch)
@@ -892,7 +976,7 @@ namespace SephiriaTogether
                 UnitAvatar previous = cachedEnemy;
                 UnitAvatar selected = FindNearestReachableCandidate(player);
                 cachedEnemy = selected;
-                nextEnemySearch = Time.unscaledTime + 0.12f;
+                nextEnemySearch = Time.unscaledTime + 0.25f;
                 if (previous == null || selected == null || previous.netId != selected.netId)
                     ResetEnemyProgress(player, selected);
             }
@@ -907,30 +991,37 @@ namespace SephiriaTogether
             if (bossTarget != null) return bossTarget;
             long hostileLayers = player.GetHostileFactionLayers(EDamageFromType.None);
             PathGrid grid = PathGrid.Current;
-            IEnumerable<UnitAvatar> candidates = CombatManager.Instance.AllCreatures
-                .Where(candidate => candidate != null && candidate != player && !IsExcludedCombatTarget(candidate) &&
-                    !candidate.IsDead &&
-                    candidate.canBeTarget.IsTrue() &&
-                    (hostileLayers & RuntimeFactionManager.Instance.FindFactionLayer(candidate.faction)) != 0L &&
-                    (!UnreachableEnemies.TryGetValue(candidate.netId, out float retryAt) ||
-                     Time.unscaledTime >= retryAt))
-                .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude);
-            foreach (UnitAvatar candidate in candidates)
+            float nearestDistanceLimit = float.MaxValue;
+            for (int attempt = 0; attempt < 8; attempt++)
             {
-                float distance = (candidate.transform.position - player.transform.position).sqrMagnitude;
-                if (distance > 2500f) break;
+                UnitAvatar nearest = null;
+                float nearestDistance = nearestDistanceLimit;
+                foreach (UnitAvatar candidate in CombatManager.Instance.AllCreatures)
+                {
+                    if (!IsLivingHostileOnCurrentFloor(player, candidate, hostileLayers) ||
+                        !candidate.canBeTarget.IsTrue() ||
+                        UnreachableEnemies.TryGetValue(candidate.netId, out float retryAt) && Time.unscaledTime < retryAt)
+                        continue;
+                    float distance = (candidate.transform.position - player.transform.position).sqrMagnitude;
+                    if (distance >= nearestDistance) continue;
+                    nearest = candidate;
+                    nearestDistance = distance;
+                }
+                if (nearest == null) break;
+                UnitAvatar reachableCandidate = nearest;
                 if (grid != null && grid.IsBuilt)
                 {
                     EnemyReachabilityPath.Clear();
-                    if (!grid.WorldToCell(candidate.transform.position, out int x, out int y) || grid.IsBlocked(x, y) ||
-                        !PathFinder.Find(grid, player.transform.position, candidate.transform.position,
+                    if (!grid.WorldToCell(reachableCandidate.transform.position, out _, out _) ||
+                        !PathFinder.Find(grid, player.transform.position, reachableCandidate.transform.position,
                             EnemyReachabilityPath) || EnemyReachabilityPath.Count == 0)
                     {
-                        UnreachableEnemies[candidate.netId] = Time.unscaledTime + 1f;
+                        UnreachableEnemies[reachableCandidate.netId] = Time.unscaledTime + 1f;
+                        nearestDistanceLimit = nearestDistance;
                         continue;
                     }
                 }
-                return candidate;
+                return reachableCandidate;
             }
             UnitAvatar objectiveCandidate = FindQuestObjectiveCreature(player);
             if (objectiveCandidate != null)
@@ -958,16 +1049,19 @@ namespace SephiriaTogether
             if (boss is Unit_RootDemon rootDemon)
             {
                 Unit_RootDemonPart part = rootDemon.roots
-                    .Where(candidate => candidate != null && !candidate.IsDead && !candidate.isDestroyed &&
+                    .Where(candidate => candidate != null && !IsExcludedCombatTarget(candidate) &&
+                                        !candidate.IsDead && !candidate.isDestroyed &&
                                         candidate.IsEyeOpened && candidate.canBeTarget.IsTrue())
                     .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
                     .FirstOrDefault();
                 if (part != null) return part;
             }
-            if (boss != null && !boss.IsDead && boss.canBeTarget.IsTrue()) return boss;
+            if (boss != null && !IsExcludedCombatTarget(boss) && !boss.IsDead &&
+                boss.canBeTarget.IsTrue()) return boss;
 
             return CombatManager.Instance.AllCreatures
-                .Where(candidate => candidate != null && candidate != player && !candidate.IsDead &&
+                .Where(candidate => candidate != null && candidate != player &&
+                                    !IsExcludedCombatTarget(candidate) && !candidate.IsDead &&
                                     candidate.canBeTarget.IsTrue() &&
                                     (candidate.monsterType == EMonsterType.Boss ||
                                      candidate is Unit_RootDemonPart part && !part.isDestroyed && part.IsEyeOpened))
@@ -1001,8 +1095,50 @@ namespace SephiriaTogether
 
         private static bool IsExcludedCombatTarget(UnitAvatar candidate)
         {
-            return candidate == null || candidate is PlayerAvatar ||
+            if (candidate == null || candidate is PlayerAvatar player && CloneBotManager.IsBot(player.spawner))
+                return true;
+            return candidate is PlayerAvatar ||
                    string.Equals(candidate.faction, "Merchant", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsLivingHostileOnCurrentFloor(PlayerAvatar player, UnitAvatar candidate,
+            long hostileLayers)
+        {
+            return player != null && candidate != null && candidate != player &&
+                   !IsExcludedCombatTarget(candidate) && !candidate.IsDead &&
+                   candidate.monsterType != EMonsterType.Dummy && candidate.gameObject.activeInHierarchy &&
+                   IsUnitOnCurrentFloor(player, candidate) && RuntimeFactionManager.Instance != null &&
+                   (hostileLayers & RuntimeFactionManager.Instance.FindFactionLayer(candidate.faction)) != 0L;
+        }
+
+        private static bool IsUnitOnCurrentFloor(PlayerAvatar player, UnitAvatar candidate)
+        {
+            FloorGenerator parent = candidate.GetComponentInParent<FloorGenerator>();
+            if (parent != null) return parent.guid == player.currentFloorGuid;
+            PathGrid grid = PathGrid.Current;
+            if (grid != null && grid.IsBuilt)
+                return grid.WorldToCell(candidate.transform.position, out _, out _);
+            return (candidate.transform.position - player.transform.position).sqrMagnitude <= 40000f;
+        }
+
+        private static UnitAvatar FindRemainingHostileOnCurrentFloor(PlayerAvatar player)
+        {
+            if (player == null || CombatManager.Instance == null || RuntimeFactionManager.Instance == null)
+                return null;
+            long hostileLayers = player.GetHostileFactionLayers(EDamageFromType.None);
+            UnitAvatar nearest = null;
+            float nearestDistance = float.MaxValue;
+            foreach (UnitAvatar candidate in CombatManager.Instance.AllCreatures)
+            {
+                if (!IsLivingHostileOnCurrentFloor(player, candidate, hostileLayers)) continue;
+                float distance = (candidate.transform.position - player.transform.position).sqrMagnitude;
+                if (distance < nearestDistance)
+                {
+                    nearest = candidate;
+                    nearestDistance = distance;
+                }
+            }
+            return nearest;
         }
 
         private static void TrackEnemyProgress(PlayerAvatar player)
@@ -1525,7 +1661,7 @@ namespace SephiriaTogether
         private static bool TryRescueTeammate(PlayerAvatar player, UnitAvatar enemy, out Vector2 movement)
         {
             movement = Vector2.zero;
-            if ((PlayerSpawner.MultiplayerList?.Count ?? 0) <= 1) return false;
+            if (CloneBotManager.RealPlayerCount <= 1) return false;
             if (rescueTarget != null && (!rescueTarget.IsDead ||
                                          rescueTarget.currentFloorGuid != player.currentFloorGuid))
                 CancelRescue(player);
@@ -1822,6 +1958,11 @@ namespace SephiriaTogether
         {
             movement = Vector2.zero;
             if (player == null || player.IsInBattle) return false;
+            if (!IsCurrentFloorClearedForExit(player, out string clearReason))
+            {
+                LogFloorClearWait(player, clearReason);
+                return false;
+            }
             RefreshWorldObjectCache(player);
             Interactable board = cachedQuestBoard;
             if (board == null) return false;
@@ -1845,6 +1986,11 @@ namespace SephiriaTogether
         {
             if (player == null || Time.unscaledTime < nextQuestBoardAction ||
                 UIManager.Instance?.CurrentControlStack == null) return false;
+            if (!IsCurrentFloorClearedForExit(player, out string clearReason))
+            {
+                LogFloorClearWait(player, clearReason);
+                return false;
+            }
             UI_NewWorldMapPanel panel = UIManager.Instance.GetElement<UI_NewWorldMapPanel>();
             if (panel == null || !panel.IsOpened || !UIManager.Instance.CurrentControlStack.Contains(panel)) return false;
             UI_NewWorldMapStageBoardEvent choice = Resources.FindObjectsOfTypeAll<UI_NewWorldMapStageBoardEvent>()
@@ -1899,6 +2045,35 @@ namespace SephiriaTogether
                 !DungeonManager.Instance.generatedFloors.TryGetValue(player.currentFloorGuid, out FloorData floor))
                 return EFloorMainEventType.Unknown;
             return floor.mainEventType;
+        }
+
+        private static EFloorThreatType CurrentFloorThreat(PlayerAvatar player)
+        {
+            if (player == null || string.IsNullOrEmpty(player.currentFloorGuid))
+                return EFloorThreatType.Unknown;
+            FloorGenerator generator = FloorGenerator.FindByGuid(player.currentFloorGuid);
+            if (generator != null && generator.floorThreatType != EFloorThreatType.Unknown)
+                return generator.floorThreatType;
+            return DungeonManager.Instance != null &&
+                   DungeonManager.Instance.generatedFloors.TryGetValue(player.currentFloorGuid, out FloorData floor)
+                ? floor.threatType
+                : EFloorThreatType.Unknown;
+        }
+
+        private static bool IsRegularBattleFloor(PlayerAvatar player)
+        {
+            switch (CurrentFloorThreat(player))
+            {
+                case EFloorThreatType.UnknownBattle:
+                case EFloorThreatType.Battle:
+                case EFloorThreatType.HardBattle:
+                case EFloorThreatType.MiniBoss:
+                case EFloorThreatType.QliphothScenario:
+                case EFloorThreatType.BattleFloor:
+                    return true;
+                default:
+                    return false;
+            }
         }
 
         private static bool IsBossFloor(PlayerAvatar player)
@@ -2152,7 +2327,7 @@ namespace SephiriaTogether
 
         private static bool CanLeadParty(PlayerAvatar player)
         {
-            int count = PlayerSpawner.MultiplayerList?.Count ?? 0;
+            int count = CloneBotManager.RealPlayerCount;
             return count <= 1 || NetworkServer.active || player?.spawner != null && player.spawner.isHost;
         }
 
@@ -2333,7 +2508,11 @@ namespace SephiriaTogether
         }
 
         private static bool TryFindReachableBossTrigger(PlayerAvatar player, Vector2 lower, Vector2 upper,
-            out Vector3 destination)
+            out Vector3 destination) =>
+            TryFindReachableAreaPoint(player, lower, upper, BossTriggerPath, out destination);
+
+        private static bool TryFindReachableAreaPoint(PlayerAvatar player, Vector2 lower, Vector2 upper,
+            List<Vector3> path, out Vector3 destination)
         {
             destination = Vector3.zero;
             PathGrid grid = PathGrid.Current;
@@ -2362,13 +2541,376 @@ namespace SephiriaTogether
             foreach (Vector3 candidate in candidates.OrderBy(point =>
                          (point - player.transform.position).sqrMagnitude))
             {
-                BossTriggerPath.Clear();
-                if (!PathFinder.Find(grid, player.transform.position, candidate, BossTriggerPath) ||
-                    BossTriggerPath.Count == 0) continue;
+                path.Clear();
+                if (!PathFinder.Find(grid, player.transform.position, candidate, path) || path.Count == 0) continue;
                 destination = candidate;
                 return true;
             }
             return false;
+        }
+
+        private static bool TryApproachPendingBattleTrigger(PlayerAvatar player, out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            if (player == null || player.IsInBattle || !IsRegularBattleFloor(player))
+            {
+                ResetBattleTrigger();
+                return false;
+            }
+
+            FloorGenerator floor = FloorGenerator.FindByGuid(player.currentFloorGuid);
+            PathGrid grid = PathGrid.Current;
+            if (floor == null || grid == null || !grid.IsBuilt) return false;
+
+            if (battleTriggerFloor == player.currentFloorGuid && battleTriggerId != 0 &&
+                Time.unscaledTime < nextBattleTriggerSearch)
+            {
+                if (battleTriggerDestination != Vector3.zero)
+                    movement = Navigate(player, battleTriggerDestination, 0.2f);
+                return true;
+            }
+
+            battleTriggerFloor = player.currentFloorGuid;
+            battleTriggerId = 0;
+            battleTriggerDestination = Vector3.zero;
+            nextBattleTriggerSearch = Time.unscaledTime + 0.75f;
+            List<BattleTriggerCandidate> pendingTriggers = GetPendingBattleTriggers(player, floor, grid);
+            if (pendingTriggers.Count == 0)
+            {
+                if (battlePathRefreshFloor != player.currentFloorGuid &&
+                    battlePathRefreshCompletedFloor != player.currentFloorGuid)
+                {
+                    battlePathRefreshFloor = player.currentFloorGuid;
+                    battlePathRefreshAt = Time.unscaledTime + 0.25f;
+                }
+                ResetBattleTrigger();
+                return false;
+            }
+
+            battlePathRefreshFloor = null;
+            battlePathRefreshAt = 0f;
+            battlePathRefreshCompletedFloor = player.currentFloorGuid;
+
+            foreach (BattleTriggerCandidate pending in pendingTriggers)
+            {
+                battleTriggerId = pending.Source.GetInstanceID();
+                if (!pending.NeedsEntry)
+                {
+                    LogBattleTrigger(player, pending, pending.Started ? "waiting-started" : "waiting-start");
+                    return true;
+                }
+                if (IsInsideArea(player.transform.position, pending.Lower, pending.Upper))
+                {
+                    RememberBattleArea(player, pending, battleTriggerDestination);
+                    LogBattleTrigger(player, pending, pending.Started ? "inside-started" : "inside-trigger");
+                    return true;
+                }
+                if (!TryFindReachableAreaPoint(player, pending.Lower, pending.Upper,
+                        BattleTriggerPath, out battleTriggerDestination)) continue;
+                RememberBattleArea(player, pending, battleTriggerDestination);
+                LogBattleTrigger(player, pending, "selected");
+                movement = Navigate(player, battleTriggerDestination, 0.2f);
+                return true;
+            }
+
+            battleTriggerId = pendingTriggers[0].Source.GetInstanceID();
+            LogBattleTrigger(player, pendingTriggers[0], "no-reachable-cell");
+            return true;
+        }
+
+        private static List<BattleTriggerCandidate> FindPendingBattleTriggers(PlayerAvatar player,
+            FloorGenerator floor, PathGrid grid)
+        {
+            List<BattleTriggerCandidate> result = new List<BattleTriggerCandidate>();
+            foreach (RandomEnemyPhaseSpawner candidate in Resources.FindObjectsOfTypeAll<RandomEnemyPhaseSpawner>())
+            {
+                if (candidate == null || !candidate.gameObject.activeInHierarchy || !candidate.enableSpawn ||
+                    candidate.isCleared || candidate.spawnPhases?.phases == null ||
+                    candidate.spawnPhases.phases.Count == 0 ||
+                    !candidate.isSpawned && !candidate.spawnPhases.ambush && !candidate.spawnOnStart) continue;
+                Vector2 lower = Vector2.Min(candidate.detectArea_lb, candidate.detectArea_rt);
+                Vector2 upper = Vector2.Max(candidate.detectArea_lb, candidate.detectArea_rt);
+                if (!IsBattleTriggerOnCurrentFloor(candidate, floor, grid, (lower + upper) * 0.5f)) continue;
+                result.Add(new BattleTriggerCandidate
+                {
+                    Source = candidate,
+                    Name = candidate.name,
+                    Lower = lower,
+                    Upper = upper,
+                    NeedsEntry = candidate.spawnPhases.ambush,
+                    Started = candidate.isSpawned
+                });
+            }
+            foreach (EnemySpawner candidate in Resources.FindObjectsOfTypeAll<EnemySpawner>())
+            {
+                if (candidate == null || !candidate.gameObject.activeInHierarchy || !candidate.spawnEnabled ||
+                    candidate.isMapElementUsed || candidate.spawnDatasByPhase == null ||
+                    candidate.spawnDatasByPhase.Count == 0) continue;
+                EnemySpawner.EBattlePhase phase = Traverse.Create(candidate).Field("battlePhase")
+                    .GetValue<EnemySpawner.EBattlePhase>();
+                if (phase == EnemySpawner.EBattlePhase.End) continue;
+                Vector2 lower = (Vector2)candidate.transform.position +
+                                Vector2.Min(candidate.detectArea_lb, candidate.detectArea_rt);
+                Vector2 upper = (Vector2)candidate.transform.position +
+                                Vector2.Max(candidate.detectArea_lb, candidate.detectArea_rt);
+                if (!IsBattleTriggerOnCurrentFloor(candidate, floor, grid, (lower + upper) * 0.5f)) continue;
+                result.Add(new BattleTriggerCandidate
+                {
+                    Source = candidate,
+                    Name = candidate.name,
+                    Lower = lower,
+                    Upper = upper,
+                    NeedsEntry = true,
+                    Started = phase != EnemySpawner.EBattlePhase.None
+                });
+            }
+            foreach (CommonEnemySpawner candidate in Resources.FindObjectsOfTypeAll<CommonEnemySpawner>())
+            {
+                if (candidate == null || !candidate.gameObject.activeInHierarchy || candidate.isMapElementUsed ||
+                    candidate.spawnDatasByPhase == null || candidate.spawnDatasByPhase.Count == 0) continue;
+                CommonEnemySpawner.EBattlePhase phase = Traverse.Create(candidate).Field("battlePhase")
+                    .GetValue<CommonEnemySpawner.EBattlePhase>();
+                if (phase == CommonEnemySpawner.EBattlePhase.End ||
+                    phase == CommonEnemySpawner.EBattlePhase.None && !candidate.useDetectArea) continue;
+                Vector2 lower = (Vector2)candidate.transform.position +
+                                Vector2.Min(candidate.detectArea_lb, candidate.detectArea_rt);
+                Vector2 upper = (Vector2)candidate.transform.position +
+                                Vector2.Max(candidate.detectArea_lb, candidate.detectArea_rt);
+                if (!IsBattleTriggerOnCurrentFloor(candidate, floor, grid, (lower + upper) * 0.5f)) continue;
+                result.Add(new BattleTriggerCandidate
+                {
+                    Source = candidate,
+                    Name = candidate.name,
+                    Lower = lower,
+                    Upper = upper,
+                    NeedsEntry = candidate.useDetectArea,
+                    Started = phase != CommonEnemySpawner.EBattlePhase.None
+                });
+            }
+            return result.OrderBy(candidate => (((candidate.Lower + candidate.Upper) * 0.5f) -
+                                                  (Vector2)player.transform.position).sqrMagnitude).ToList();
+        }
+
+        private static List<BattleTriggerCandidate> GetPendingBattleTriggers(PlayerAvatar player,
+            FloorGenerator floor, PathGrid grid)
+        {
+            if (pendingBattleTriggerCacheFloor != player.currentFloorGuid ||
+                Time.unscaledTime >= nextPendingBattleTriggerScan)
+            {
+                CachedPendingBattleTriggers.Clear();
+                CachedPendingBattleTriggers.AddRange(FindPendingBattleTriggers(player, floor, grid));
+                pendingBattleTriggerCacheFloor = player.currentFloorGuid;
+                nextPendingBattleTriggerScan = Time.unscaledTime + 0.75f;
+            }
+            return CachedPendingBattleTriggers;
+        }
+
+        private static bool IsBattleTriggerOnCurrentFloor(Component candidate, FloorGenerator floor,
+            PathGrid grid, Vector2 areaCenter)
+        {
+            if (candidate is EnemySpawner enemySpawner && enemySpawner.parent != null)
+                return enemySpawner.parent == floor || enemySpawner.parent.guid == floor.guid;
+            FloorGenerator parent = candidate.GetComponentInParent<FloorGenerator>();
+            if (parent != null) return parent == floor || parent.guid == floor.guid;
+            if (candidate.transform.IsChildOf(floor.transform)) return true;
+            return grid.WorldToCell(areaCenter, out _, out _);
+        }
+
+        private static bool IsInsideArea(Vector3 position, Vector2 lower, Vector2 upper)
+        {
+            Vector2 min = Vector2.Min(lower, upper);
+            Vector2 max = Vector2.Max(lower, upper);
+            return position.x >= min.x && position.y >= min.y && position.x <= max.x && position.y <= max.y;
+        }
+
+        private static void LogBattleTrigger(PlayerAvatar player, BattleTriggerCandidate trigger,
+            string reason)
+        {
+            if (Time.unscaledTime < nextEntranceDiagnostic) return;
+            nextEntranceDiagnostic = Time.unscaledTime + 2f;
+            Plugin.LogInfo($"AFK battle trigger: reason={reason}, floor={ShortGuid(player.currentFloorGuid)}, " +
+                           $"spawner={trigger.Name}, started={trigger.Started}, " +
+                           $"area={trigger.Lower}->{trigger.Upper}, " +
+                           $"destination={battleTriggerDestination}, position={player.transform.position}.");
+        }
+
+        private static void ResetBattleTrigger()
+        {
+            battleTriggerFloor = null;
+            battleTriggerId = 0;
+            battleTriggerDestination = Vector3.zero;
+            nextBattleTriggerSearch = 0f;
+            BattleTriggerPath.Clear();
+        }
+
+        private static void RememberBattleArea(PlayerAvatar player, BattleTriggerCandidate trigger,
+            Vector3 entryPoint)
+        {
+            if (player == null || trigger == null || entryPoint == Vector3.zero) return;
+            lastBattleAreaFloor = player.currentFloorGuid;
+            lastBattleAreaLower = trigger.Lower;
+            lastBattleAreaUpper = trigger.Upper;
+            lastBattleEntryPoint = entryPoint;
+            battleExitDestination = Vector3.zero;
+        }
+
+        private static bool TryLeaveClearedBattleArea(PlayerAvatar player, out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            if (player == null || lastBattleAreaFloor != player.currentFloorGuid ||
+                player.IsInBattle || lastBattleEntryPoint == Vector3.zero ||
+                FindRemainingHostileOnCurrentFloor(player) != null)
+                return false;
+            if (!IsInsideArea(player.transform.position, lastBattleAreaLower, lastBattleAreaUpper))
+            {
+                ResetBattleAreaExit();
+                return false;
+            }
+
+            if ((lastBattleEntryPoint - player.transform.position).sqrMagnitude > 1f)
+            {
+                movement = Navigate(player, lastBattleEntryPoint, 0.35f);
+                if (movement.sqrMagnitude > 0.01f) return true;
+                return false;
+            }
+
+            if (battleExitDestination == Vector3.zero)
+            {
+                Vector2 center = (lastBattleAreaLower + lastBattleAreaUpper) * 0.5f;
+                Vector2 outward = (Vector2)lastBattleEntryPoint - center;
+                if (outward.sqrMagnitude < 0.01f) outward = player.transform.position - (Vector3)center;
+                if (outward.sqrMagnitude < 0.01f) outward = Vector2.left;
+                battleExitDestination = lastBattleEntryPoint + (Vector3)(outward.normalized * 2f);
+            }
+            Vector2 direct = battleExitDestination - player.transform.position;
+            if (direct.sqrMagnitude <= 0.25f)
+            {
+                ResetBattleAreaExit();
+                return false;
+            }
+            if (!HasClearMovementLine(player.transform.position, battleExitDestination)) return false;
+            movement = direct.normalized;
+            if (Time.unscaledTime >= nextEntranceDiagnostic)
+            {
+                nextEntranceDiagnostic = Time.unscaledTime + 2f;
+                Plugin.LogInfo($"AFK leaving cleared battle area through entry: floor={ShortGuid(player.currentFloorGuid)}, " +
+                               $"entry={lastBattleEntryPoint}, exit={battleExitDestination}, " +
+                               $"position={player.transform.position}.");
+            }
+            return true;
+        }
+
+        private static void ResetBattleAreaExit()
+        {
+            lastBattleAreaFloor = null;
+            lastBattleAreaLower = Vector2.zero;
+            lastBattleAreaUpper = Vector2.zero;
+            lastBattleEntryPoint = Vector3.zero;
+            battleExitDestination = Vector3.zero;
+        }
+
+        private static bool IsCurrentFloorClearedForExit(PlayerAvatar player, out string reason)
+        {
+            reason = "clear";
+            UnitAvatar hostile = FindRemainingHostileOnCurrentFloor(player);
+            if (hostile != null)
+            {
+                reason = "hostile-" + hostile.name;
+                return false;
+            }
+
+            FloorGenerator floor = FloorGenerator.FindByGuid(player?.currentFloorGuid);
+            PathGrid grid = PathGrid.Current;
+            if (floor == null || grid == null || !grid.IsBuilt)
+            {
+                reason = "floor-loading";
+                return false;
+            }
+            BattleTriggerCandidate pending = IsRegularBattleFloor(player)
+                ? GetPendingBattleTriggers(player, floor, grid).FirstOrDefault()
+                : null;
+            if (pending != null)
+            {
+                reason = "battle-" + pending.Name;
+                return false;
+            }
+            return true;
+        }
+
+        private static void LogFloorClearWait(PlayerAvatar player, string reason)
+        {
+            if (Time.unscaledTime < nextFloorClearDiagnostic) return;
+            nextFloorClearDiagnostic = Time.unscaledTime + 2f;
+            Plugin.LogInfo($"AFK exit blocked until floor clear: floor={ShortGuid(player?.currentFloorGuid)}, " +
+                           $"reason={reason}, position={player?.transform.position}.");
+        }
+
+        private static void RefreshBattleDoorPathGrid(PlayerAvatar player)
+        {
+            if (player == null) return;
+            bool battleCleared = battlePathRefreshFloor == player.currentFloorGuid &&
+                                 Time.unscaledTime >= battlePathRefreshAt;
+            bool doorOpened = Time.unscaledTime < refreshDoorPathsUntil &&
+                              Time.unscaledTime >= nextDoorPathRefresh;
+            if (!battleCleared && !doorOpened) return;
+            battlePathRefreshFloor = null;
+            battlePathRefreshAt = 0f;
+            refreshDoorPathsUntil = 0f;
+            nextDoorPathRefresh = 0f;
+            PathGrid grid = PathGrid.Current;
+            if (grid == null || !grid.IsBuilt) return;
+
+            RoomDoor[] doors = pendingDoorPathRefresh != null
+                ? new[] { pendingDoorPathRefresh }
+                : Resources.FindObjectsOfTypeAll<RoomDoor>();
+            pendingDoorPathRefresh = null;
+            foreach (RoomDoor door in doors)
+            {
+                if (door == null || !door.gameObject.activeInHierarchy ||
+                    !grid.WorldToCell(door.transform.position, out _, out _)) continue;
+                Bounds bounds = BoundsForPathRefresh(door.gameObject);
+                grid.UpdateRegion(bounds);
+            }
+            entranceApproachDestination = Vector3.zero;
+            entranceApproachId = 0;
+            nextEntranceApproachSearch = 0f;
+            cachedEnemy = null;
+            nextEnemySearch = 0f;
+            UnreachableEnemies.Clear();
+            ResetPath();
+            Plugin.LogInfo($"AFK refreshed battle-door path grid: floor={ShortGuid(player.currentFloorGuid)}, " +
+                           $"position={player.transform.position}.");
+        }
+
+        internal static void NotifyRoomDoorOpened(RoomDoor door)
+        {
+            if (!enabled || door == null) return;
+            PlayerAvatar player = LocalPlayer();
+            PathGrid grid = PathGrid.Current;
+            if (player == null || grid == null || !grid.IsBuilt ||
+                !grid.WorldToCell(door.transform.position, out _, out _)) return;
+            refreshDoorPathsUntil = Time.unscaledTime + 1.5f;
+            nextDoorPathRefresh = 0f;
+            battlePathRefreshFloor = player.currentFloorGuid;
+            battlePathRefreshAt = 0f;
+            battlePathRefreshCompletedFloor = null;
+            pendingDoorPathRefresh = door;
+            entranceApproachDestination = Vector3.zero;
+            entranceApproachId = 0;
+            nextEntranceApproachSearch = 0f;
+            ResetPath();
+            Plugin.LogInfo($"AFK room door opened; scheduling path refresh: floor={ShortGuid(player.currentFloorGuid)}, " +
+                           $"door={door.name}, position={door.transform.position}.");
+        }
+
+        private static Bounds BoundsForPathRefresh(GameObject target)
+        {
+            Collider2D[] colliders = target.GetComponentsInChildren<Collider2D>(true);
+            if (colliders.Length == 0) return new Bounds(target.transform.position, Vector3.one * 4f);
+            Bounds bounds = colliders[0].bounds;
+            for (int i = 1; i < colliders.Length; i++) bounds.Encapsulate(colliders[i].bounds);
+            bounds.Expand(3f);
+            return bounds;
         }
 
         private static bool TryApproachNextEntrance(PlayerAvatar player, out Vector2 movement)
@@ -2380,6 +2922,12 @@ namespace SephiriaTogether
                 return false;
             }
             if (player.IsInBattle && !CompletedBossFloors.Contains(player.currentFloorGuid)) return false;
+            if (!IsCurrentFloorClearedForExit(player, out string clearReason))
+            {
+                LogFloorClearWait(player, clearReason);
+                return false;
+            }
+            RefreshBattleDoorPathGrid(player);
             RefreshWorldObjectCache(player);
             Interactable entrance = cachedEntrance;
             if (entrance == null) return false;
@@ -2402,11 +2950,13 @@ namespace SephiriaTogether
                     nextEntranceApproachSearch = Time.unscaledTime + 1f;
                     if (!TryFindEntranceApproach(player, entrance, out entranceApproachDestination))
                     {
+                        entranceApproachDestination = Vector3.zero;
+                        ResetPath();
                         Vector2 direct = entrance.transform.position - player.transform.position;
-                        if (direct.sqrMagnitude > 0.01f)
+                        if (direct.sqrMagnitude > 0.01f && HasClearMovementLineToEntrance(player, entrance))
                         {
                             movement = direct.normalized;
-                            LogEntranceDiagnostic(player, entrance, "direct-fallback-no-path");
+                            LogEntranceDiagnostic(player, entrance, "cleared-floor-direct-fallback");
                             return true;
                         }
                         LogEntranceDiagnostic(player, entrance, "no-reachable-approach");
@@ -2461,12 +3011,36 @@ namespace SephiriaTogether
             return true;
         }
 
+        private static bool HasClearMovementLineToEntrance(PlayerAvatar player, Interactable entrance)
+        {
+            if (player == null || entrance == null) return false;
+            if (!HasClearMovementLine(player.transform.position,
+                    Vector3.MoveTowards(entrance.transform.position, player.transform.position, 1.5f))) return false;
+            return true;
+        }
+
+        private static bool HasClearMovementLine(Vector3 from, Vector3 to)
+        {
+            Vector2 direction = to - from;
+            float distance = direction.magnitude;
+            if (distance <= 0.01f) return true;
+            foreach (RaycastHit2D hit in Physics2D.RaycastAll(from, direction / distance, distance,
+                         CombatManager.BlockCharacterLayerMask))
+            {
+                if (hit.collider == null || hit.distance <= 0.05f ||
+                    hit.collider.GetComponentInParent<UnitAvatar>() != null) continue;
+                return false;
+            }
+            return true;
+        }
+
         private static bool ArePlayersReadyAtStair(PlayerAvatar local, Interactable entrance, out string reason)
         {
             reason = "ready";
             if (local == null || entrance == null || PlayerSpawner.MultiplayerList == null) return true;
             foreach (PlayerSpawner peer in PlayerSpawner.MultiplayerList)
             {
+                if (CloneBotManager.IsBot(peer)) continue;
                 PlayerAvatar avatar = peer?.PlayerAvatar;
                 if (avatar == null || avatar.IsDead) continue;
                 if (avatar.IsInBattle)
@@ -2524,6 +3098,11 @@ namespace SephiriaTogether
 
         private static bool TryMoveToTeammateFloor(PlayerAvatar player)
         {
+            if (!IsCurrentFloorClearedForExit(player, out string clearReason))
+            {
+                LogFloorClearWait(player, clearReason);
+                return false;
+            }
             PlayerAvatar teammate = FindConnectedForwardTeammate(player);
             if (teammate?.spawner == null || !teammate.spawner.isHost) return false;
             FloorData current = DungeonManager.Instance.generatedFloors[player.currentFloorGuid];
@@ -2542,7 +3121,8 @@ namespace SephiriaTogether
                 .Where(guid => DungeonManager.Instance.generatedFloors.TryGetValue(guid, out FloorData floor) &&
                                floor.nodeProgress > current.nodeProgress));
             return PlayerSpawner.MultiplayerList
-                .Where(peer => peer?.PlayerAvatar != null && peer.PlayerAvatar != player && !peer.PlayerAvatar.IsDead &&
+                .Where(peer => peer?.PlayerAvatar != null && !CloneBotManager.IsBot(peer) &&
+                               peer.PlayerAvatar != player && !peer.PlayerAvatar.IsDead &&
                                forward.Contains(peer.PlayerAvatar.currentFloorGuid))
                 .OrderByDescending(peer => peer.isHost)
                 .Select(peer => peer.PlayerAvatar)
@@ -2551,6 +3131,11 @@ namespace SephiriaTogether
 
         private static bool TryMoveToConnectedFloor(PlayerAvatar player)
         {
+            if (!IsCurrentFloorClearedForExit(player, out string clearReason))
+            {
+                LogFloorClearWait(player, clearReason);
+                return false;
+            }
             if (DungeonManager.Instance == null ||
                 !DungeonManager.Instance.generatedFloors.TryGetValue(player.currentFloorGuid, out FloorData current)) return false;
             List<FloorData> forward = (current.connectionToOtherFloors ?? new string[0])
@@ -2685,6 +3270,49 @@ namespace SephiriaTogether
                            $"changed={(changed.HasValue ? changed.Value.ToString() : "pending-server")}.");
         }
 
+        internal static void ArrangeInventoryNow()
+        {
+            PlayerAvatar player = LocalPlayer();
+            GridInventory inventory = player?.Inventory;
+            if (!CanManualArrangeInventory || player == null || inventory == null)
+            {
+                manualArrangeStatus = MenuText.Get("ManualArrangeUnavailable");
+                return;
+            }
+
+            bool? changed = null;
+            if (inventory.isServer)
+            {
+                changed = inventory.AutoArrangeInventoryForBestCharmLevels(1, allowTabletRotation: true);
+                lastInventorySignature = InventorySignature(player, inventory);
+            }
+            else
+            {
+                inventory.RequestAutoArrangeInventoryForBestCharmLevels(1, allowTabletRotation: true);
+            }
+            pendingInventorySignature = null;
+            arrangeInventoryAt = 0f;
+            nextInventorySignatureCheck = Time.unscaledTime + 0.5f;
+            nextInventoryArrangeAllowed = Time.unscaledTime + 5f;
+            manualArrangeStatus = !changed.HasValue ? MenuText.Get("ManualArrangeRequested")
+                : changed.Value ? MenuText.Get("ManualArrangeComplete")
+                : MenuText.Get("ManualArrangeNoChange");
+            Plugin.LogInfo($"Manual inventory optimization requested: player={player.Name}, " +
+                           $"items={inventory.inventoryMatrix.Count}, storage={inventory.CurrentInventoryStorage}, " +
+                           $"changed={(changed.HasValue ? changed.Value.ToString() : "pending-server")}.");
+        }
+
+        internal static void ClearManualArrangeStatus() => manualArrangeStatus = null;
+
+        internal static bool CanArrangeInventoryOnServer(GridInventory inventory)
+        {
+            PlayerAvatar player = inventory?.UnitAvatar as PlayerAvatar;
+            return NetworkServer.active && inventory != null && inventory.isServer && player != null &&
+                   !player.IsDead && !player.IsInBattle && player.localDataStorage != null &&
+                   SaveManager.IsSaving == SaveManager.ESaveState.None &&
+                   inventory.CurrentInventoryStorage > 1 && inventory.charms.Count > 0;
+        }
+
         private static string InventorySignature(PlayerAvatar player, GridInventory inventory)
         {
             WeaponSimple weapon = player?.GetComponent<WeaponControllerSimple>()?.currentWeapon;
@@ -2712,6 +3340,7 @@ namespace SephiriaTogether
         {
             movement = Vector2.zero;
             if (TryClaimFavoriteReward(player)) return true;
+            if (TryHandleUtilityFloorReward(player, out movement)) return true;
             if (CurrentFloorEvent(player) != EFloorMainEventType.StoneTablet) return false;
 
             if (rewardOpportunityFloor != player.currentFloorGuid)
@@ -2757,6 +3386,106 @@ namespace SephiriaTogether
                               altar.selections != null && altar.selections.Any(selection => selection != null &&
                                   selection.isEnabled));
             return unresolvedAltar || Time.unscaledTime < rewardOpportunityWaitUntil;
+        }
+
+        private static bool TryHandleUtilityFloorReward(PlayerAvatar player, out Vector2 movement)
+        {
+            movement = Vector2.zero;
+            if (player == null || !IsCurrentFloorClearedForExit(player, out _)) return false;
+
+            Component reward = null;
+            Interactable interactable = null;
+            EFloorMainEventType eventType = CurrentFloorEvent(player);
+            if (eventType == EFloorMainEventType.InventoryStorage)
+            {
+                InventoryOrb orb = FindFloorComponent<InventoryOrb>(player, candidate =>
+                    !Traverse.Create(candidate).Property("LocalAcquired").GetValue<bool>());
+                reward = orb;
+                interactable = orb?.GetComponent<Interactable>();
+            }
+            else if (eventType == EFloorMainEventType.EXP)
+            {
+                EXPOrb orb = FindFloorComponent<EXPOrb>(player, candidate => !candidate.used);
+                if (orb != null)
+                {
+                    float stopDistance = Mathf.Max(0.5f, orb.playerCheckDistance * 0.75f);
+                    Vector2 delta = orb.transform.position - player.transform.position;
+                    if (delta.sqrMagnitude > stopDistance * stopDistance)
+                        movement = Navigate(player, orb.transform.position, stopDistance);
+                    return true;
+                }
+                EXPChest chest = FindFloorComponent<EXPChest>(player, candidate => !candidate.isOpened);
+                reward = chest;
+                interactable = chest?.interactable;
+            }
+            else if (eventType == EFloorMainEventType.MaxHP)
+            {
+                MaxHPDispenser dispenser = FindFloorComponent<MaxHPDispenser>(player, candidate =>
+                    !Traverse.Create(candidate).Field("locallyUsed").GetValue<bool>());
+                reward = dispenser;
+                interactable = dispenser?.interactable;
+            }
+            else if (eventType == EFloorMainEventType.Dice)
+            {
+                DiceSpawner spawner = FindFloorComponent<DiceSpawner>(player, candidate =>
+                    !Traverse.Create(candidate).Property("LocalServed").GetValue<bool>());
+                reward = spawner;
+                interactable = spawner?.interactable;
+            }
+            else if (eventType == EFloorMainEventType.Sapphire)
+            {
+                SapphireChest chest = FindFloorComponent<SapphireChest>(player, candidate => !candidate.isOpened);
+                reward = chest;
+                interactable = chest?.interactable;
+            }
+            else if (eventType == EFloorMainEventType.Money)
+            {
+                MoneyChest chest = FindFloorComponent<MoneyChest>(player, candidate => !candidate.isOpened);
+                reward = chest;
+                interactable = chest?.interactable;
+            }
+            else if (eventType == EFloorMainEventType.HP && player.hp < player.MaxHp)
+            {
+                HPDispenser dispenser = FindFloorComponent<HPDispenser>(player, candidate =>
+                    !Traverse.Create(candidate).Field("locallyUsed").GetValue<bool>());
+                reward = dispenser;
+                interactable = dispenser?.interactable;
+            }
+
+            if (reward == null || interactable == null) return false;
+            Vector2 toReward = reward.transform.position - player.transform.position;
+            if (toReward.sqrMagnitude > 2.25f)
+            {
+                movement = Navigate(player, reward.transform.position, 1.25f);
+                return true;
+            }
+            if (Time.unscaledTime >= nextRewardAction && interactable.IsInteractable(player.gameObject))
+            {
+                nextRewardAction = Time.unscaledTime + 1f;
+                interactable.Interactive(player.gameObject);
+                Plugin.LogInfo($"AFK autopilot claimed utility reward: player={player.Name}, " +
+                               $"floor={ShortGuid(player.currentFloorGuid)}, event={eventType}, " +
+                               $"reward={reward.name}.");
+            }
+            return true;
+        }
+
+        private static T FindFloorComponent<T>(PlayerAvatar player, Func<T, bool> predicate) where T : Component
+        {
+            return Resources.FindObjectsOfTypeAll<T>()
+                .Where(candidate => candidate != null && candidate.gameObject.activeInHierarchy &&
+                                    IsComponentOnCurrentFloor(candidate, player) && predicate(candidate))
+                .OrderBy(candidate => (candidate.transform.position - player.transform.position).sqrMagnitude)
+                .FirstOrDefault();
+        }
+
+        private static bool IsComponentOnCurrentFloor(Component component, PlayerAvatar player)
+        {
+            if (component == null || player == null) return false;
+            FloorGenerator parent = component.GetComponentInParent<FloorGenerator>();
+            if (parent != null) return parent.guid == player.currentFloorGuid;
+            PathGrid grid = PathGrid.Current;
+            return grid != null && grid.IsBuilt && grid.WorldToCell(component.transform.position, out _, out _);
         }
 
         private static bool TryClaimFavoriteReward(PlayerAvatar player)
@@ -4469,6 +5198,13 @@ namespace SephiriaTogether
             cachedQuestBoard = null;
             entranceApproachDestination = Vector3.zero;
             entranceApproachId = 0;
+            ResetBattleTrigger();
+            ResetBattleAreaExit();
+            battlePathRefreshFloor = null;
+            battlePathRefreshAt = 0f;
+            battlePathRefreshCompletedFloor = null;
+            refreshDoorPathsUntil = 0f;
+            nextDoorPathRefresh = 0f;
             cachedReward = null;
             bossTriggerDestination = Vector3.zero;
             bossTriggerFloor = null;
@@ -4489,6 +5225,12 @@ namespace SephiriaTogether
             cachedQuestBoard = null;
             entranceApproachDestination = Vector3.zero;
             entranceApproachId = 0;
+            ResetBattleTrigger();
+            ResetBattleAreaExit();
+            battlePathRefreshFloor = null;
+            battlePathRefreshAt = 0f;
+            refreshDoorPathsUntil = 0f;
+            nextDoorPathRefresh = 0f;
             cachedReward = null;
             bossTriggerDestination = Vector3.zero;
             bossTriggerFloor = null;
@@ -4977,26 +5719,23 @@ namespace SephiriaTogether
 
         private static void ReportDiagnostics(PlayerAvatar player, string action, UnitAvatar enemy, Vector2 movement)
         {
-            string state = action + ":" + (enemy != null ? enemy.netId.ToString() : "-") + ":" +
-                           (movement.sqrMagnitude > 0.01f ? "move" : "stop");
-            bool changed = state != lastDiagnosticState;
+            bool moving = movement.sqrMagnitude > 0.01f;
+            uint enemyNetId = enemy != null ? enemy.netId : 0;
+            bool changed = !diagnosticStateInitialized || action != lastDiagnosticAction ||
+                           enemyNetId != lastDiagnosticEnemyNetId || moving != lastDiagnosticMoving;
             if (!changed && Time.unscaledTime < nextDiagnosticHeartbeat) return;
-            lastDiagnosticState = state;
+            lastDiagnosticAction = action;
+            lastDiagnosticEnemyNetId = enemyNetId;
+            lastDiagnosticMoving = moving;
+            diagnosticStateInitialized = true;
             nextDiagnosticHeartbeat = Time.unscaledTime + 3f;
+            if (!changed && Time.unscaledTime < nextDiagnosticChangeLog) return;
+            nextDiagnosticChangeLog = Time.unscaledTime + 0.75f;
             PathGrid grid = PathGrid.Current;
-            bool preferSecondary = ShouldUsePreferredSecondary(player);
-            WeaponTactics tactics = AdjustTacticsForEnemy(
-                preferSecondary ? GetSecondaryTactics(player) : GetWeaponTactics(player), enemy);
             Plugin.LogInfo($"AFK status: action={action}, player={player.Name}, floor={ShortGuid(player.currentFloorGuid)}, " +
-                             $"pos={player.transform.position}, enemy={DescribeUnit(enemy)}, move={movement}, " +
-                             $"weapon={tactics.Name}, attack={(preferSecondary ? "secondary" : "primary")}, " +
-                             $"range={tactics.MinimumRange:0.0}-{tactics.MaximumRange:0.0}, " +
-                            $"attackHeld={attackHeld}/{(attackHeld ? Time.unscaledTime - attackHeldSince : 0f):0.0}s, " +
-                            $"peers={DescribePeerFloors(player)}, " +
-                            $"input={player.localDataStorage.currentInput}/{player.localDataStorage.isInputReceived}, " +
-                           $"grid={(grid != null ? grid.IsBuilt.ToString() : "null")}, path={pathIndex}/{CurrentPath.Count}, " +
-                           $"ui={(UIManager.Instance?.CurrentControlStack != null)}, defending={defenseHeld}, " +
-                           $"rescue={(rescueTarget != null ? rescueTarget.Name : "-")}.");
+                            $"pos={player.transform.position}, enemy={DescribeUnit(enemy)}, move={movement}, " +
+                            $"grid={(grid != null ? grid.IsBuilt.ToString() : "null")}, path={pathIndex}/{CurrentPath.Count}, " +
+                            $"defending={defenseHeld}, rescue={(rescueTarget != null ? rescueTarget.Name : "-")}.");
         }
 
         private static void ReportBlockedDiagnostics(PlayerAvatar player, string reason)
@@ -5156,6 +5895,12 @@ namespace SephiriaTogether
             BlockInput(__instance) = __state;
             AutoPilot.Tick(__instance);
         }
+    }
+
+    [HarmonyPatch(typeof(RoomDoor), "UserCode_RpcOpen")]
+    internal static class AutoPilotRoomDoorOpenPatch
+    {
+        private static void Postfix(RoomDoor __instance) => AutoPilot.NotifyRoomDoorOpened(__instance);
     }
 
     [HarmonyPatch(typeof(WeaponControllerSimple), "Update")]
@@ -5324,6 +6069,21 @@ namespace SephiriaTogether
         {
             if (__instance?.PlayerAvatar != null && __instance.WorldUserName != null)
                 __instance.WorldUserName.text = AutoPilot.DisplayName(__instance.PlayerAvatar);
+        }
+    }
+
+    [HarmonyPatch(typeof(GridInventory), "UserCode_CmdAutoArrangeInventoryForBestCharmLevels__Int32__Boolean")]
+    internal static class ManualArrangeServerGuardPatch
+    {
+        private static bool Prefix(GridInventory __instance)
+        {
+            bool allowed = AutoPilot.CanArrangeInventoryOnServer(__instance) &&
+                           !__instance.UnitAvatar.GetComponent<PlayerLocalDataStorage>().doingSomeUIThings &&
+                           !__instance.UnitAvatar.GetComponent<PlayerLocalDataStorage>().preparingUIThings &&
+                           !SaveManagement.IsBusy;
+            if (!allowed)
+                Plugin.LogInfo($"Inventory optimization rejected by server guard: player={__instance?.UnitAvatar?.Name}.");
+            return allowed;
         }
     }
 

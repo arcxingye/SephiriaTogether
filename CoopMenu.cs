@@ -66,6 +66,10 @@ namespace SephiriaTogether
         private static string transferAmountText = "100";
         private static uint pendingTransferTarget;
         private static int pendingTransferAmount;
+        private static int cloneSourcePage;
+        private static int cloneBotPage;
+
+        private const int CloneRowsPerPage = 4;
 
         internal static bool IsCapturingShortcut => capturingShortcut != 0;
         internal static bool IsOpen => open;
@@ -86,6 +90,7 @@ namespace SephiriaTogether
                     blockedController.BlockAvatarInput = true;
                 }
                 playerLimitText = PlayerLimit.CurrentLimit.ToString();
+                AutoPilot.ClearManualArrangeStatus();
                 RefreshPresetOptions();
                 SaveManagement.Refresh();
             }
@@ -180,29 +185,7 @@ namespace SephiriaTogether
             scroll = GUILayout.BeginScrollView(scroll, false, true);
             GUILayout.Space(8f);
             GUILayout.Label(MenuText.Get("NextSpawn"), muted);
-            DrawValue(MenuText.Get("MenuShortcut"), Plugin.menuShortcut.Value.ToString(), 180f);
-            if (capturingShortcut == 1)
-            {
-                GUILayout.Label(MenuText.Get("PressNewShortcut"), muted);
-                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
-                {
-                    capturingShortcut = 0;
-                }
-            }
-            else if (GUILayout.Button(MenuText.Get("ChangeShortcut"), button, GUILayout.Height(30f)))
-            {
-                capturingShortcut = 1;
-            }
-            DrawValue(MenuText.Get("RescueShortcut"), Plugin.rescueShortcut.Value.ToString(), 180f);
-            if (capturingShortcut == 2)
-            {
-                GUILayout.Label(MenuText.Get("PressNewRescueShortcut"), muted);
-                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f))) capturingShortcut = 0;
-            }
-            else if (GUILayout.Button(MenuText.Get("ChangeRescueShortcut"), button, GUILayout.Height(30f)))
-            {
-                capturingShortcut = 2;
-            }
+            DrawLocalShortcutSettings();
             DrawHostRuleTabs();
 
             if (hostRulesTab == 0)
@@ -238,6 +221,84 @@ namespace SephiriaTogether
             DrawToggle(MenuText.Get("Catchup"), Plugin.catchUpExperienceRatio.Value > 0.5f,
                 () => Plugin.catchUpExperienceRatio.Value = Plugin.catchUpExperienceRatio.Value > 0.5f ? 0f : 1f);
             EndSection();
+
+            GUILayout.Space(8f);
+            BeginSection(MenuText.Get("StartProgress"));
+            GUILayout.Label(MenuText.Get("StartProgressHelp"), muted);
+            List<PlayerSpawner> progressPlayers = StartProgressSelection.GetCandidates();
+            if (progressPlayers.Count == 0)
+            {
+                GUILayout.Label(MenuText.Get("StartProgressNoPlayers"), muted);
+            }
+            else
+            {
+                foreach (PlayerSpawner progressPlayer in progressPlayers)
+                {
+                    GUI.enabled = StartProgressSelection.CanSelectPlayer(progressPlayer);
+                    if (GUILayout.Button(StartProgressSelection.Describe(progressPlayer),
+                            StartProgressSelection.IsSelected(progressPlayer) ? primaryButton : button,
+                            GUILayout.Height(32f)))
+                        StartProgressSelection.Select(progressPlayer);
+                    GUI.enabled = true;
+                }
+            }
+            GUI.enabled = StartProgressSelection.CanApplySelected;
+            if (GUILayout.Button(MenuText.Get("StartProgressApply"), primaryButton, GUILayout.Height(36f)))
+            {
+                if (StartProgressSelection.ApplySelected()) Close();
+            }
+            GUI.enabled = true;
+            if (!string.IsNullOrEmpty(StartProgressSelection.Status))
+                GUILayout.Label(StartProgressSelection.Status, muted);
+            EndSection();
+
+            GUILayout.Space(8f);
+            BeginSection(MenuText.Get("CloneBots"));
+            GUILayout.Label(MenuText.Get("CloneBotsHelp"), muted);
+            List<PlayerSpawner> cloneSources = (PlayerSpawner.MultiplayerList ?? new List<PlayerSpawner>())
+                .Where(source => source?.PlayerAvatar != null && !CloneBotManager.IsBot(source))
+                .OrderBy(source => source.PlayerAvatar.Name)
+                .ToList();
+            GUILayout.Label(MenuText.Get("CloneSources"), section);
+            cloneSourcePage = ClampPage(cloneSourcePage, cloneSources.Count, CloneRowsPerPage);
+            foreach (PlayerSpawner source in cloneSources.Skip(cloneSourcePage * CloneRowsPerPage)
+                         .Take(CloneRowsPerPage))
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(source.PlayerAvatar.Name, body);
+                GUILayout.FlexibleSpace();
+                GUI.enabled = CloneBotManager.CanClonePlayer(source);
+                if (GUILayout.Button(MenuText.Get("CloneLocalPlayer"), primaryButton,
+                        GUILayout.Width(110f), GUILayout.Height(30f)))
+                    CloneBotManager.CreateCloneOf(source);
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
+            }
+            DrawPager(ref cloneSourcePage, cloneSources.Count, CloneRowsPerPage);
+
+            List<PlayerSpawner> activeBots = CloneBotManager.ActiveBots
+                .Where(bot => bot?.PlayerAvatar != null)
+                .ToList();
+            GUILayout.Space(6f);
+            GUILayout.Label(MenuText.Get("ActiveCloneBots"), section);
+            if (activeBots.Count == 0) GUILayout.Label(MenuText.Get("NoCloneBots"), muted);
+            cloneBotPage = ClampPage(cloneBotPage, activeBots.Count, CloneRowsPerPage);
+            foreach (PlayerSpawner bot in activeBots.Skip(cloneBotPage * CloneRowsPerPage)
+                         .Take(CloneRowsPerPage))
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(bot.PlayerAvatar.Name, body);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button(MenuText.Get("RemoveCloneBot"), button,
+                        GUILayout.Width(96f), GUILayout.Height(28f)))
+                    CloneBotManager.RemoveBot(bot);
+                GUILayout.EndHorizontal();
+            }
+            DrawPager(ref cloneBotPage, activeBots.Count, CloneRowsPerPage);
+            if (activeBots.Count > 0 &&
+                GUILayout.Button(MenuText.Get("RemoveAllCloneBots"), button, GUILayout.Height(32f)))
+                CloneBotManager.RemoveAllBots();
+            EndSection();
             }
 
             if (hostRulesTab == 1)
@@ -254,20 +315,22 @@ namespace SephiriaTogether
             int currentPreset = GetPreset();
             DrawValue(MenuText.Get("CurrentPreset"), GetPresetName(currentPreset), 150f);
             GUILayout.BeginHorizontal();
+            if (GUILayout.Button(MenuText.Get("PresetCasual"), currentPreset == 1 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(1);
             if (GUILayout.Button(MenuText.Get("PresetOriginal"), currentPreset == 0 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(0);
-            if (GUILayout.Button(MenuText.Get("PresetLight"), currentPreset == 1 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(1);
             GUILayout.EndHorizontal();
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(MenuText.Get("PresetStandard"), currentPreset == 2 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(2);
             if (GUILayout.Button(MenuText.Get("PresetHigh"), currentPreset == 3 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(3);
             GUILayout.EndHorizontal();
-            int activePlayers = Mathf.Max(1, PlayerSpawner.MultiplayerList != null ? PlayerSpawner.MultiplayerList.Count : 1);
+            int activePlayers = CloneBotManager.RealPlayerCount;
             int extraPlayers = Mathf.Max(0, activePlayers - Plugin.BaselinePlayersValue);
-            float healthMultiplier = 1f + extraPlayers * Plugin.HealthPerExtraPlayerValue;
+            float healthMultiplier = Plugin.BaseEnemyMultiplierValue *
+                                     (1f + extraPlayers * Plugin.HealthPerExtraPlayerValue);
             if (Plugin.MaximumMultiplierValue > 0f) healthMultiplier = Mathf.Min(healthMultiplier, Plugin.MaximumMultiplierValue);
-            float countMultiplier = Plugin.scaleEnemyCount.Value
-                ? Mathf.Min(Plugin.MaximumEnemyCountMultiplierValue, 1f + extraPlayers * Plugin.EnemyCountPerExtraPlayerValue)
-                : 1f;
+            float countMultiplier = Plugin.BaseEnemyMultiplierValue * (Plugin.scaleEnemyCount.Value
+                ? 1f + extraPlayers * Plugin.EnemyCountPerExtraPlayerValue
+                : 1f);
+            countMultiplier = Mathf.Min(Plugin.MaximumEnemyCountMultiplierValue, countMultiplier);
             GUILayout.BeginVertical(playerCard);
             GUILayout.Label(string.Format(MenuText.Get("ScalingPreviewPlayers"), activePlayers), section);
             DrawValue(MenuText.Get("PreviewHealth"), healthMultiplier.ToString("0.00") + "x");
@@ -319,13 +382,14 @@ namespace SephiriaTogether
             {
                 DrawPlayers();
             }
+            GUILayout.Space(8f);
+            GUILayout.EndScrollView();
             GUILayout.Space(4f);
             GUILayout.BeginHorizontal();
             if (GUILayout.Button(MenuText.Get("Save"), primaryButton, GUILayout.Height(38f))) Plugin.SaveSettings();
             if (GUILayout.Button(MenuText.Get("Close"), button, GUILayout.Height(38f))) Toggle();
             GUILayout.EndHorizontal();
             GUILayout.Space(8f);
-            GUILayout.EndScrollView();
             GUILayout.EndVertical();
             GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
         }
@@ -437,7 +501,8 @@ namespace SephiriaTogether
             EndSection();
 
             List<PlayerAvatar> recipients = PlayerSpawner.MultiplayerList?
-                .Where(spawner => spawner?.PlayerAvatar != null && spawner.PlayerAvatar != local)
+                .Where(spawner => spawner?.PlayerAvatar != null && !CloneBotManager.IsBot(spawner) &&
+                                  spawner.PlayerAvatar != local)
                 .Select(spawner => spawner.PlayerAvatar)
                 .ToList() ?? new List<PlayerAvatar>();
             if (recipients.Count == 0)
@@ -609,6 +674,42 @@ namespace SephiriaTogether
             Event.current.Use();
         }
 
+        private static void DrawLocalShortcutSettings()
+        {
+            DrawValue(MenuText.Get("MenuShortcut"), Plugin.FormatShortcut(Plugin.menuShortcut.Value), 180f);
+            if (capturingShortcut == 1)
+            {
+                GUILayout.Label(MenuText.Get("PressNewShortcut"), muted);
+                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
+                    capturingShortcut = 0;
+            }
+            else if (GUILayout.Button(MenuText.Get("ChangeShortcut"), button, GUILayout.Height(30f)))
+            {
+                capturingShortcut = 1;
+            }
+
+            DrawValue(MenuText.Get("RescueShortcut"), Plugin.FormatShortcut(Plugin.rescueShortcut.Value), 180f);
+            if (capturingShortcut == 2)
+            {
+                GUILayout.Label(MenuText.Get("PressNewRescueShortcut"), muted);
+                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
+                    capturingShortcut = 0;
+                return;
+            }
+
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button(MenuText.Get("ChangeRescueShortcut"), button, GUILayout.Height(30f)))
+                capturingShortcut = 2;
+            GUI.enabled = Plugin.IsShortcutBound(Plugin.rescueShortcut.Value);
+            if (GUILayout.Button(MenuText.Get("ClearShortcut"), button, GUILayout.Width(120f), GUILayout.Height(30f)))
+            {
+                Plugin.rescueShortcut.Value = BepInEx.Configuration.KeyboardShortcut.Empty;
+                Plugin.SaveSettings();
+            }
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+        }
+
         private static void DrawClientPage()
         {
             CatchUpRewards.SendHello();
@@ -623,6 +724,12 @@ namespace SephiriaTogether
                 : selectedTab == 3 ? MenuText.Get("TabDiagnostics") : MenuText.Get("TabHistory");
             string content = selectedTab == 0 ? CatchUpRewards.ClientRules
                 : selectedTab == 3 ? CatchUpRewards.ClientDiagnostics : CatchUpRewards.ClientHistory;
+            if (selectedTab == 0)
+            {
+                BeginSection(MenuText.Get("LocalShortcuts"));
+                DrawLocalShortcutSettings();
+                EndSection();
+            }
             BeginSection(heading);
             GUILayout.Label(string.IsNullOrEmpty(content) ? MenuText.Get("NoData") : content, body);
             if (selectedTab == 3)
@@ -719,16 +826,26 @@ namespace SephiriaTogether
         {
             GUILayout.Space(8f);
             GUILayout.Label(MenuText.Get("AutoPilotLocalSettings"), section);
-            DrawValue(MenuText.Get("AutoPilotShortcut"), Plugin.autoPilotShortcut.Value.ToString(), 180f);
+            DrawValue(MenuText.Get("AutoPilotShortcut"), Plugin.FormatShortcut(Plugin.autoPilotShortcut.Value), 180f);
             if (capturingShortcut == 3)
             {
                 GUILayout.Label(MenuText.Get("PressNewAutoPilotShortcut"), muted);
                 if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
                     capturingShortcut = 0;
             }
-            else if (GUILayout.Button(MenuText.Get("ChangeAutoPilotShortcut"), button, GUILayout.Height(30f)))
+            else
             {
-                capturingShortcut = 3;
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button(MenuText.Get("ChangeAutoPilotShortcut"), button, GUILayout.Height(30f)))
+                    capturingShortcut = 3;
+                GUI.enabled = Plugin.IsShortcutBound(Plugin.autoPilotShortcut.Value);
+                if (GUILayout.Button(MenuText.Get("ClearShortcut"), button, GUILayout.Width(120f), GUILayout.Height(30f)))
+                {
+                    Plugin.autoPilotShortcut.Value = BepInEx.Configuration.KeyboardShortcut.Empty;
+                    Plugin.SaveSettings();
+                }
+                GUI.enabled = true;
+                GUILayout.EndHorizontal();
             }
             GUILayout.Label(MenuText.Get("AutoPilotHelp"), muted);
             if (GUILayout.Button(MenuText.Get(AutoPilot.Enabled ? "DisableAutoPilot" : "EnableAutoPilot"),
@@ -757,6 +874,12 @@ namespace SephiriaTogether
             GUILayout.Label(MenuText.Get("AutoAttackModeHelp"), muted);
             DrawToggle(MenuText.Get("AutoArrangeInventory"), Plugin.autoArrangeInventory);
             GUILayout.Label(MenuText.Get("AutoArrangeInventoryHelp"), muted);
+            GUI.enabled = AutoPilot.CanManualArrangeInventory;
+            if (GUILayout.Button(MenuText.Get("ManualArrangeInventory"), button, GUILayout.Height(32f)))
+                AutoPilot.ArrangeInventoryNow();
+            GUI.enabled = true;
+            if (!string.IsNullOrEmpty(AutoPilot.ManualArrangeStatus))
+                GUILayout.Label(AutoPilot.ManualArrangeStatus, muted);
             DrawToggle(MenuText.Get("AutoDefend"), Plugin.autoDefend);
             GUILayout.Label(MenuText.Get("AutoDefendHelp"), muted);
         }
@@ -1079,11 +1202,12 @@ namespace SephiriaTogether
 
         private static void DrawPlayers()
         {
-            int count = PlayerSpawner.MultiplayerList != null ? PlayerSpawner.MultiplayerList.Count : 0;
+            int count = CloneBotManager.RealPlayerCount;
             GUILayout.Label(MenuText.Get("Players") + "  " + count, section);
             if (PlayerSpawner.MultiplayerList == null) return;
             foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList.ToArray())
             {
+                if (CloneBotManager.IsBot(player)) continue;
                 if (player == null || player.PlayerAvatar == null) continue;
                 LevelController level = player.GetComponent<LevelController>();
                 GUILayout.BeginVertical(playerCard);
@@ -1112,6 +1236,7 @@ namespace SephiriaTogether
             Plugin.SetBaselinePlayers(4);
             if (preset == 0)
             {
+                Plugin.SetBaseEnemyMultiplier(1f);
                 Plugin.SetHealthPerExtraPlayer(0f);
                 Plugin.SetMaximumMultiplier(1f);
                 Plugin.scaleEnemyCount.Value = false;
@@ -1120,14 +1245,16 @@ namespace SephiriaTogether
             }
             else if (preset == 1)
             {
-                Plugin.SetHealthPerExtraPlayer(0.1f);
-                Plugin.SetMaximumMultiplier(4f);
-                Plugin.scaleEnemyCount.Value = true;
-                Plugin.SetEnemyCountPerExtraPlayer(0.04f);
-                Plugin.SetMaximumEnemyCountMultiplier(2f);
+                Plugin.SetBaseEnemyMultiplier(0.25f);
+                Plugin.SetHealthPerExtraPlayer(0f);
+                Plugin.SetMaximumMultiplier(1f);
+                Plugin.scaleEnemyCount.Value = false;
+                Plugin.SetEnemyCountPerExtraPlayer(0f);
+                Plugin.SetMaximumEnemyCountMultiplier(1f);
             }
             else if (preset == 2)
             {
+                Plugin.SetBaseEnemyMultiplier(1f);
                 Plugin.SetHealthPerExtraPlayer(0.15f);
                 Plugin.SetMaximumMultiplier(8f);
                 Plugin.scaleEnemyCount.Value = true;
@@ -1136,6 +1263,7 @@ namespace SephiriaTogether
             }
             else
             {
+                Plugin.SetBaseEnemyMultiplier(1f);
                 Plugin.SetHealthPerExtraPlayer(0.25f);
                 Plugin.SetMaximumMultiplier(12f);
                 Plugin.scaleEnemyCount.Value = true;
@@ -1147,27 +1275,54 @@ namespace SephiriaTogether
 
         private static int GetPreset()
         {
-            if (MatchesScaling(0f, 1f, false, 0f, 1f)) return 0;
-            if (MatchesScaling(0.1f, 4f, true, 0.04f, 2f)) return 1;
-            if (MatchesScaling(0.15f, 8f, true, 0.08f, 3f)) return 2;
-            if (MatchesScaling(0.25f, 12f, true, 0.15f, 4f)) return 3;
+            if (MatchesScaling(1f, 0f, 1f, false, 0f, 1f)) return 0;
+            if (MatchesScaling(0.25f, 0f, 1f, false, 0f, 1f)) return 1;
+            if (MatchesScaling(1f, 0.15f, 8f, true, 0.08f, 3f)) return 2;
+            if (MatchesScaling(1f, 0.25f, 12f, true, 0.15f, 4f)) return 3;
             return -1;
         }
 
         private static string GetPresetName(int preset) => preset == 0 ? MenuText.Get("PresetOriginal")
-            : preset == 1 ? MenuText.Get("PresetLight")
+            : preset == 1 ? MenuText.Get("PresetCasual")
             : preset == 2 ? MenuText.Get("PresetStandard")
             : preset == 3 ? MenuText.Get("PresetHigh")
             : MenuText.Get("PresetCustom");
 
-        private static bool MatchesScaling(float hp, float hpCap, bool countEnabled, float count, float countCap)
+        private static bool MatchesScaling(float baseMultiplier, float hp, float hpCap, bool countEnabled,
+            float count, float countCap)
         {
             return Plugin.BaselinePlayersValue == 4 &&
+                   Mathf.Approximately(Plugin.BaseEnemyMultiplierValue, baseMultiplier) &&
                    Mathf.Approximately(Plugin.HealthPerExtraPlayerValue, hp) &&
                    Mathf.Approximately(Plugin.MaximumMultiplierValue, hpCap) &&
                    Plugin.scaleEnemyCount.Value == countEnabled &&
                    Mathf.Approximately(Plugin.EnemyCountPerExtraPlayerValue, count) &&
                    Mathf.Approximately(Plugin.MaximumEnemyCountMultiplierValue, countCap);
+        }
+
+        private static int ClampPage(int page, int itemCount, int pageSize)
+        {
+            int pageCount = Mathf.Max(1, Mathf.CeilToInt(itemCount / (float)pageSize));
+            return Mathf.Clamp(page, 0, pageCount - 1);
+        }
+
+        private static void DrawPager(ref int page, int itemCount, int pageSize)
+        {
+            int pageCount = Mathf.Max(1, Mathf.CeilToInt(itemCount / (float)pageSize));
+            page = Mathf.Clamp(page, 0, pageCount - 1);
+            if (pageCount <= 1) return;
+
+            GUILayout.BeginHorizontal();
+            GUI.enabled = page > 0;
+            if (GUILayout.Button("<", button, GUILayout.Width(42f), GUILayout.Height(28f))) page--;
+            GUI.enabled = true;
+            GUILayout.FlexibleSpace();
+            GUILayout.Label((page + 1) + " / " + pageCount, badge, GUILayout.Width(90f), GUILayout.Height(28f));
+            GUILayout.FlexibleSpace();
+            GUI.enabled = page < pageCount - 1;
+            if (GUILayout.Button(">", button, GUILayout.Width(42f), GUILayout.Height(28f))) page++;
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
         }
 
         private static void BeginSection(string heading)
@@ -1295,7 +1450,8 @@ namespace SephiriaTogether
 
         private static void Kick(PlayerSpawner player)
         {
-            if (!NetworkServer.active || player == null || player.connectionToClient == null) return;
+            if (!NetworkServer.active || player == null || CloneBotManager.IsBot(player) ||
+                player.connectionToClient == null) return;
             player.connectionToClient.Disconnect();
         }
 

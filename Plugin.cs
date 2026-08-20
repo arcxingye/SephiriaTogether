@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Linq;
 using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
@@ -15,9 +16,10 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.5.2";
+        public const string PluginVersion = "3.6.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
+        private static ConfigEntry<float> baseEnemyMultiplier;
         private static ConfigEntry<float> healthPerExtraPlayer;
         private static ConfigEntry<float> maximumMultiplier;
         internal static ConfigEntry<bool> allowLowerProgressPlayers;
@@ -64,17 +66,19 @@ namespace SephiriaTogether
                 "Interface",
                 "MenuShortcut",
                 new KeyboardShortcut(KeyCode.F8),
-                "Shortcut used to open and close the Sephiria Together menu.");
+                "Required shortcut used to open and close the Sephiria Together menu.");
+            if (!IsShortcutBound(menuShortcut.Value))
+                menuShortcut.Value = new KeyboardShortcut(KeyCode.F8);
             rescueShortcut = Config.Bind(
                 "Interface",
                 "RescueShortcut",
                 new KeyboardShortcut(KeyCode.R),
-                "Shortcut a downed player uses to request rescue from modded teammates.");
+                "Optional shortcut a downed player uses to request rescue from modded teammates.");
             autoPilotShortcut = Config.Bind(
                 "Interface",
                 "AutoPilotShortcut",
                 new KeyboardShortcut(KeyCode.F9),
-                "Shortcut used to enable or disable conservative AFK autopilot.");
+                "Optional shortcut used to enable or disable conservative AFK autopilot. It can also be controlled from the menu.");
             autoChoiceStrategy = Config.Bind(
                 "Autopilot",
                 "ChoiceStrategy",
@@ -173,6 +177,13 @@ namespace SephiriaTogether
                 new ConfigDescription(
                     "No extra scaling at or below this player count. Set to 0 to test scaling alone.",
                     new AcceptableValueRange<int>(0, 250)));
+            baseEnemyMultiplier = Config.Bind(
+                "Scaling",
+                "BaseEnemyMultiplier",
+                1f,
+                new ConfigDescription(
+                    "Base multiplier applied to original enemy health and wave size before extra-player scaling.",
+                    new AcceptableValueRange<float>(0.05f, 4f)));
             healthPerExtraPlayer = Config.Bind(
                 "Scaling",
                 "HealthPerExtraPlayer",
@@ -244,7 +255,8 @@ namespace SephiriaTogether
             harmony.PatchAll();
             ApplyPlayerLimit();
             Logger.LogInfo(
-                $"Enemy scaling loaded: +{Math.Max(0f, healthPerExtraPlayer.Value) * 100f:0.##}% original health " +
+                $"Enemy scaling loaded: base x{BaseEnemyMultiplierValue:0.##}, " +
+                $"+{Math.Max(0f, healthPerExtraPlayer.Value) * 100f:0.##}% original health " +
                 $"per player above {Math.Max(0, scalingStartsAbove.Value)}. Host only.");
             Logger.LogInfo(
                 $"Mid-run join={allowMidRunJoin.Value}, catch-up EXP={catchUpExperienceRatio.Value:P0}, " +
@@ -252,18 +264,26 @@ namespace SephiriaTogether
         }
 
         internal static int BaselinePlayersValue => scalingStartsAbove.Value;
+        internal static float BaseEnemyMultiplierValue => baseEnemyMultiplier.Value;
         internal static float HealthPerExtraPlayerValue => healthPerExtraPlayer.Value;
         internal static float MaximumMultiplierValue => maximumMultiplier.Value;
         internal static float EnemyCountPerExtraPlayerValue => enemyCountPerExtraPlayer.Value;
         internal static float MaximumEnemyCountMultiplierValue => maximumEnemyCountMultiplier.Value;
         internal static void SetBaselinePlayers(int value) => scalingStartsAbove.Value = Mathf.Clamp(value, 0, 250);
+        internal static void SetBaseEnemyMultiplier(float value) => baseEnemyMultiplier.Value = Mathf.Clamp(value, 0.05f, 4f);
         internal static void SetHealthPerExtraPlayer(float value) => healthPerExtraPlayer.Value = Mathf.Clamp(value, 0f, 5f);
         internal static void SetMaximumMultiplier(float value) => maximumMultiplier.Value = Mathf.Clamp(value, 0f, 100f);
         internal static void SetEnemyCountPerExtraPlayer(float value) => enemyCountPerExtraPlayer.Value = Mathf.Clamp(value, 0f, 1f);
         internal static void SetMaximumEnemyCountMultiplier(float value) => maximumEnemyCountMultiplier.Value = Mathf.Clamp(value, 1f, 10f);
         internal static void SaveSettings() => Instance?.Config.Save();
+        internal static bool IsShortcutBound(KeyboardShortcut shortcut) => shortcut.MainKey != KeyCode.None;
+        internal static string FormatShortcut(KeyboardShortcut shortcut) =>
+            IsShortcutBound(shortcut) ? shortcut.ToString() : MenuText.Get("ShortcutUnbound");
         internal static void LogInfo(string message) =>
             Instance?.Logger.LogInfo($"[{DateTime.Now:HH:mm:ss.fff}] {message}");
+
+        private static bool UsesUnmodifiedKey(KeyboardShortcut shortcut, KeyCode key) =>
+            shortcut.MainKey == key && !shortcut.Modifiers.Any();
 
         internal static void ApplyPlayerLimit()
         {
@@ -289,7 +309,8 @@ namespace SephiriaTogether
             BreathingHealPatch.Clear();
             AutoRevivePatch.Clear();
             CatchUpRewards.ClearClientState();
-            CatchUpRewards.ClearServerState();
+            CatchUpRewards.ClearServerConnectionState();
+            CloneBotManager.Clear();
             AutoPilot.Clear();
         }
 
@@ -303,8 +324,10 @@ namespace SephiriaTogether
 
         private void Update()
         {
-            bool f8Held = Keyboard.current != null && Keyboard.current.f8Key.isPressed;
-            bool f9Held = Keyboard.current != null && Keyboard.current.f9Key.isPressed;
+            bool f8Held = UsesUnmodifiedKey(menuShortcut.Value, KeyCode.F8) &&
+                          Keyboard.current != null && Keyboard.current.f8Key.isPressed;
+            bool f9Held = UsesUnmodifiedKey(autoPilotShortcut.Value, KeyCode.F9) &&
+                          Keyboard.current != null && Keyboard.current.f9Key.isPressed;
             bool fallbackF8Pressed = f8Held && !lastF8Held;
             bool fallbackF9Pressed = f9Held && !lastF9Held;
             lastF8Held = f8Held;
@@ -326,6 +349,7 @@ namespace SephiriaTogether
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
             MoneyTransfer.Tick();
+            StartProgressSelection.Tick();
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)
@@ -355,15 +379,15 @@ namespace SephiriaTogether
 
             int playerCount = CountActivePlayers();
             int extraPlayers = Math.Max(0, playerCount - Math.Max(0, scalingStartsAbove.Value));
-            if (extraPlayers == 0)
-            {
-                yield break;
-            }
-
-            float multiplier = 1f + Math.Max(0f, healthPerExtraPlayer.Value) * extraPlayers;
+            float multiplier = Math.Max(0.05f, baseEnemyMultiplier.Value) *
+                               (1f + Math.Max(0f, healthPerExtraPlayer.Value) * extraPlayers);
             if (maximumMultiplier.Value > 0f)
             {
-                multiplier = Math.Min(multiplier, Math.Max(1f, maximumMultiplier.Value));
+                multiplier = Math.Min(multiplier, Math.Max(0.05f, maximumMultiplier.Value));
+            }
+            if (Mathf.Approximately(multiplier, 1f))
+            {
+                yield break;
             }
 
             float newBaseMaxHp = avatar.maxHp * multiplier;
@@ -409,7 +433,8 @@ namespace SephiriaTogether
             {
                 foreach (PlayerSpawner playerSpawner in PlayerSpawner.MultiplayerList)
                 {
-                    if (playerSpawner != null && playerSpawner.PlayerAvatar != null)
+                    if (playerSpawner != null && playerSpawner.PlayerAvatar != null &&
+                        !CloneBotManager.IsBot(playerSpawner))
                     {
                         count++;
                     }

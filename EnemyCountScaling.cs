@@ -14,7 +14,8 @@ namespace SephiriaTogether
         private static void Postfix(MonsterSpawnPhase __instance, int multiplayerCount,
             ref MonsterSpawnPhase __result)
         {
-            if (!Plugin.scaleEnemyCount.Value || __instance?.spawnDatas == null ||
+            if ((!Plugin.scaleEnemyCount.Value && Mathf.Approximately(Plugin.BaseEnemyMultiplierValue, 1f)) ||
+                __instance?.spawnDatas == null ||
                 __instance.spawnDatas.Count == 0 || __result?.spawnDatas == null ||
                 __result.spawnDatas.Count == 0) return;
 
@@ -31,12 +32,14 @@ namespace SephiriaTogether
             }
 
             int extraPlayers = Math.Max(0, multiplayerCount - Plugin.BaselinePlayersValue);
-            float multiplier = extraPlayers > 0
-                ? Mathf.Min(Plugin.MaximumEnemyCountMultiplierValue,
-                    1f + extraPlayers * Plugin.EnemyCountPerExtraPlayerValue)
+            float extraMultiplier = Plugin.scaleEnemyCount.Value && extraPlayers > 0
+                ? 1f + extraPlayers * Plugin.EnemyCountPerExtraPlayerValue
                 : 1f;
+            float multiplier = Mathf.Min(Plugin.MaximumEnemyCountMultiplierValue,
+                Plugin.BaseEnemyMultiplierValue * extraMultiplier);
             int baseTotal = baseCounts.Sum();
-            int targetTotal = Mathf.Clamp(Mathf.RoundToInt(baseTotal * multiplier), baseTotal,
+            int minimumTotal = multiplier < 1f ? 1 : baseTotal;
+            int targetTotal = Mathf.Clamp(Mathf.RoundToInt(baseTotal * multiplier), minimumTotal,
                 MaximumConcurrentEnemies);
             int[] targetCounts = DistributeCounts(baseCounts, baseTotal, targetTotal);
             float economyFactor = baseTotal > 0 ? (float)targetTotal / baseTotal : 1f;
@@ -98,7 +101,7 @@ namespace SephiriaTogether
         {
             int desired = EnemyCountScalingPatch.DesiredConcurrentLimit(__instance);
             if (desired <= 0) return;
-            int players = PlayerSpawner.MultiplayerList?.Count ?? 1;
+            int players = CloneBotManager.RealPlayerCount;
             int vanilla = EnemyCountScalingPatch.VanillaConcurrentLimit(players);
             __instance.additionalUnitCountLimit = Math.Max(__instance.additionalUnitCountLimit,
                 Math.Max(0, desired - vanilla));

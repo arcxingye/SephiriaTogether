@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -99,6 +100,7 @@ namespace SephiriaTogether
         }
 
         private static readonly Dictionary<int, Credits> ServerCredits = new Dictionary<int, Credits>();
+        private static readonly HashSet<int> ModdedConnections = new HashSet<int>();
         private static readonly Dictionary<uint, PendingSephirite> PendingSephirites = new Dictionary<uint, PendingSephirite>();
         private static readonly Dictionary<uint, BossRewardSession> BossRewardSessions = new Dictionary<uint, BossRewardSession>();
         private static bool clientHelloSent;
@@ -131,10 +133,12 @@ namespace SephiriaTogether
         {
             ConfigureSerialization();
             NetworkServer.RegisterHandler<CatchUpHelloMessage>(OnServerHello, true);
+            NetworkServer.RegisterHandler<CatchUpClaimMessage>(OnServerClaim, true);
             MidRunJoin.RegisterServerMessages();
             RescueAlerts.RegisterServerMessages();
             AutoPilot.RegisterServerMessages();
             MoneyTransfer.RegisterServerMessages();
+            StartProgressSelection.RegisterServerMessages();
         }
 
         internal static void RegisterClientMessages()
@@ -144,6 +148,7 @@ namespace SephiriaTogether
             RescueAlerts.RegisterClientMessages();
             AutoPilot.RegisterClientMessages();
             MoneyTransfer.RegisterClientMessages();
+            StartProgressSelection.RegisterClientMessages();
         }
 
         private static void ConfigureSerialization()
@@ -216,12 +221,13 @@ namespace SephiriaTogether
 
         internal static void Prepare(PlayerSpawner newcomer, IEnumerable<string> missedFloors)
         {
-            if (!NetworkServer.active || newcomer?.connectionToClient == null ||
+            if (!NetworkServer.active || CloneBotManager.IsBot(newcomer) || newcomer?.connectionToClient == null ||
                 newcomer.PlayerAvatar == null || DungeonManager.Instance == null)
             {
                 return;
             }
-            bool clientMod = ServerCredits.TryGetValue(newcomer.connectionToClient.connectionId, out Credits existing) &&
+            bool clientMod = ModdedConnections.Contains(newcomer.connectionToClient.connectionId) ||
+                             ServerCredits.TryGetValue(newcomer.connectionToClient.connectionId, out Credits existing) &&
                              existing.ClientMod;
             Credits credits = Load(newcomer.playerGuid);
             credits.ClientMod = clientMod;
@@ -230,7 +236,6 @@ namespace SephiriaTogether
             ConvertPendingEnchants(newcomer, newcomer.PlayerAvatar.currentFloorGuid);
             ConvertPendingChoiceFloors(newcomer, newcomer.PlayerAvatar.currentFloorGuid);
             ConvertPendingFusions(newcomer, newcomer.PlayerAvatar.currentFloorGuid);
-            RemoveCurrentFloorFromCatchUp(newcomer, credits);
             Plugin.LogInfo($"Catch-up prepare: player={newcomer.PlayerAvatar.Name}, conn={newcomer.connectionToClient.connectionId}, " +
                            $"guid={ShortGuid(newcomer.playerGuid)}, floor={ShortGuid(newcomer.PlayerAvatar.currentFloorGuid)}, " +
                            $"history={newcomer.PlayerAvatar.floorTravelHistory.Count}, pendingWeapon={credits.Weapons}, " +
@@ -249,8 +254,19 @@ namespace SephiriaTogether
                 Plugin.LogInfo($"Catch-up eligible completed floor: player={newcomer.PlayerAvatar.Name}, floor={ShortGuid(guid)}, " +
                                $"progress={floor.nodeProgress}, event={floor.mainEventType}, threat={floor.threatType}.");
 
-                string eventKey = guid + ":" + floor.mainEventType;
-                if (!credits.CountedFloors.Contains(eventKey) && !credits.CountedFloors.Contains(guid))
+                string eventKey = EventKey(guid, floor.mainEventType);
+                bool alreadyProcessed = WasEventProcessed(credits, guid, floor.mainEventType) ||
+                                        floor.mainEventType == EFloorMainEventType.StoneTablet &&
+                                        credits.CountedFloors.Contains(TabletFusionChoiceKey(guid));
+                if (!alreadyProcessed && IsLegacyRemovedFloor(credits, guid, floor.mainEventType))
+                {
+                    alreadyProcessed = true;
+                    credits.CountedFloors.Add(eventKey);
+                    changed = true;
+                    Plugin.LogInfo($"Migrated legacy removed floor marker: player={newcomer.PlayerAvatar.Name}, " +
+                                   $"floor={ShortGuid(guid)}, event={floor.mainEventType}.");
+                }
+                if (!alreadyProcessed)
                 {
                     switch (floor.mainEventType)
                     {
@@ -297,12 +313,17 @@ namespace SephiriaTogether
                     AddHistory(credits, "Catch-up: " + floor.mainEventType + " @ " + ShortGuid(guid));
                     changed = true;
                 }
+                else
+                {
+                    Plugin.LogInfo($"Catch-up skipped already processed floor: player={newcomer.PlayerAvatar.Name}, " +
+                                   $"floor={ShortGuid(guid)}, event={floor.mainEventType}.");
+                }
 
                 string fusionKey = guid + ":Fusion";
                 bool tabletFusionChoice = floor.mainEventType == EFloorMainEventType.StoneTablet &&
-                                          FusionCompensation.IsObservedFloor(guid);
+                                           FusionCompensation.IsObservedFloor(guid);
                 if (!tabletFusionChoice && FusionCompensation.IsObservedFloor(guid) &&
-                    !credits.CountedFloors.Contains(fusionKey))
+                    !WasFusionProcessed(credits, guid))
                 {
                     credits.Fusions++;
                     credits.CountedFloors.Add(fusionKey);
@@ -333,6 +354,7 @@ namespace SephiriaTogether
         internal static bool ShouldTrackUnclaimedFloor(PlayerSpawner player)
         {
             if (!NetworkServer.active || player?.PlayerAvatar == null || player.connectionToClient == null) return false;
+            if (CloneBotManager.IsBot(player)) return false;
             return !player.isHost && player.connectionToClient != NetworkServer.localConnection;
         }
 
@@ -340,6 +362,7 @@ namespace SephiriaTogether
         {
             if (!NetworkServer.active || player == null ||
                 !player.isHost && player.connectionToClient != NetworkServer.localConnection) return;
+            if (CloneBotManager.IsBot(player)) return;
             Credits credits = GetServerCredits(player);
             int removed = credits.PendingAnvilFloors.Count + credits.PendingEnchantFloors.Count +
                           credits.PendingMiracleFloors.Count + credits.PendingCharmFloors.Count +
@@ -353,34 +376,7 @@ namespace SephiriaTogether
             credits.PendingFusionFloors.Clear();
             AddHistory(credits, $"Discarded {removed} local/host reward-floor marker(s)");
             Plugin.LogInfo($"Discarded ineligible local reward-floor markers: player={player?.PlayerAvatar?.Name}, " +
-                           $"count={removed}, host={player?.isHost}, party={PlayerSpawner.MultiplayerList?.Count ?? 0}.");
-            Save(credits);
-        }
-
-        private static void RemoveCurrentFloorFromCatchUp(PlayerSpawner player, Credits credits)
-        {
-            string guid = player?.PlayerAvatar?.currentFloorGuid;
-            if (string.IsNullOrEmpty(guid) || DungeonManager.Instance == null ||
-                !DungeonManager.Instance.generatedFloors.TryGetValue(guid, out FloorData floor)) return;
-            string eventKey = guid + ":" + floor.mainEventType;
-            if (!credits.CountedFloors.Remove(eventKey)) return;
-            switch (floor.mainEventType)
-            {
-                case EFloorMainEventType.Anvil: credits.Weapons = Math.Max(0, credits.Weapons - 1); break;
-                case EFloorMainEventType.Enchant: credits.Enchants = Math.Max(0, credits.Enchants - 1); break;
-                case EFloorMainEventType.Miracle: credits.Miracles = Math.Max(0, credits.Miracles - 1); break;
-                case EFloorMainEventType.Charm:
-                    credits.Charms = Math.Max(0, credits.Charms - 1);
-                    RemoveOnePendingSephirite(credits, 6);
-                    break;
-                case EFloorMainEventType.StoneTablet:
-                    credits.Tablets = Math.Max(0, credits.Tablets - 1);
-                    RemoveOnePendingSephirite(credits, 4);
-                    break;
-            }
-            AddHistory(credits, "Removed current-floor catch-up: " + floor.mainEventType + " @ " + ShortGuid(guid));
-            Plugin.LogInfo($"Removed invalid current-floor entitlement: player={player.PlayerAvatar.Name}, floor={ShortGuid(guid)}, " +
-                           $"event={floor.mainEventType}.");
+                           $"count={removed}, host={player?.isHost}, party={CloneBotManager.RealPlayerCount}.");
             Save(credits);
         }
 
@@ -388,7 +384,7 @@ namespace SephiriaTogether
         {
             if (!ShouldTrackUnclaimedFloor(player)) return;
             Credits credits = GetServerCredits(player);
-            if (credits.CountedFloors.Contains(TabletFusionChoiceKey(floorGuid))) return;
+            if (WasFusionProcessed(credits, floorGuid)) return;
             if (string.IsNullOrEmpty(floorGuid) || !credits.PendingFusionFloors.Add(floorGuid)) return;
             Plugin.LogInfo($"Pending Tablet Fusion floor recorded: player={player?.PlayerAvatar?.Name}, floor={ShortGuid(floorGuid)}.");
             Save(credits);
@@ -397,15 +393,32 @@ namespace SephiriaTogether
         internal static void ConvertPendingFusions(PlayerSpawner player, string currentFloorGuid)
         {
             Credits credits = GetServerCredits(player);
+            if (!ConvertPendingFusionSet(credits, currentFloorGuid, player)) return;
+            Save(credits);
+            Plugin.LogInfo($"Pending Tablet Fusion converted: player={player?.PlayerAvatar?.Name}, fusionCredits={credits.Fusions}.");
+        }
+
+        private static bool ConvertPendingFusionSet(Credits credits, string currentFloorGuid, PlayerSpawner player)
+        {
             bool changed = false;
             foreach (string floor in credits.PendingFusionFloors.ToArray())
             {
                 if (floor == currentFloorGuid) continue;
                 credits.PendingFusionFloors.Remove(floor);
-                if (IsTabletFusionChoiceFloor(floor))
+                bool mutualChoice = IsTabletFusionChoiceFloor(floor);
+                if (WasFusionProcessed(credits, floor) ||
+                    mutualChoice && (WasEventProcessed(credits, floor, EFloorMainEventType.StoneTablet) ||
+                                     credits.CountedFloors.Contains(TabletFusionChoiceKey(floor))))
+                {
+                    if (mutualChoice) credits.PendingTabletFloors.Remove(floor);
+                    changed = true;
+                    continue;
+                }
+                if (mutualChoice)
                 {
                     credits.PendingTabletFloors.Remove(floor);
                     credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+                    credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.StoneTablet));
                     credits.Tablets++;
                     AddHistory(credits, "Catch-up: unclaimed Tablet/Fusion choice -> StoneTablet @ " + ShortGuid(floor));
                     Plugin.LogInfo($"Mutual Tablet/Fusion choice converted once: player={player?.PlayerAvatar?.Name}, " +
@@ -414,13 +427,12 @@ namespace SephiriaTogether
                 else
                 {
                     credits.Fusions++;
+                    credits.CountedFloors.Add(EventKey(floor, "Fusion"));
                     AddHistory(credits, "Catch-up: unclaimed Tablet Fusion @ " + ShortGuid(floor));
                 }
                 changed = true;
             }
-            if (!changed) return;
-            Save(credits);
-            Plugin.LogInfo($"Pending Tablet Fusion converted: player={player?.PlayerAvatar?.Name}, fusionCredits={credits.Fusions}.");
+            return changed;
         }
 
         internal static void MarkCurrentFusionClaimed(PlayerSpawner player)
@@ -430,10 +442,19 @@ namespace SephiriaTogether
             if (string.IsNullOrEmpty(floor)) return;
             bool fusion = credits.PendingFusionFloors.Remove(floor);
             bool tablet = credits.PendingTabletFloors.Remove(floor);
-            if (!fusion && !tablet) return;
-            credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+            if (!fusion && !tablet && !FusionCompensation.IsObservedFloor(floor)) return;
+            if (IsTabletFusionChoiceFloor(floor))
+            {
+                credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+                credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.StoneTablet));
+            }
+            else
+            {
+                credits.CountedFloors.Add(EventKey(floor, "Fusion"));
+            }
             Plugin.LogInfo($"Original Tablet Fusion used: player={player.PlayerAvatar?.Name}, floor={ShortGuid(floor)}, " +
                            $"clearedFusion={fusion}, clearedTabletAlternative={tablet}.");
+            AddHistory(credits, "Original Tablet Fusion used @ " + ShortGuid(floor));
             player.SaveCurrentSessionData();
             Save(credits);
         }
@@ -443,31 +464,29 @@ namespace SephiriaTogether
             Credits credits = GetServerCredits(player);
             string floor = player?.PlayerAvatar?.currentFloorGuid;
             if (string.IsNullOrEmpty(floor) || !credits.PendingFusionFloors.Remove(floor)) return false;
-            if (IsTabletFusionChoiceFloor(floor))
+            bool mutualChoice = IsTabletFusionChoiceFloor(floor);
+            if (WasFusionProcessed(credits, floor) ||
+                mutualChoice && (WasEventProcessed(credits, floor, EFloorMainEventType.StoneTablet) ||
+                                 credits.CountedFloors.Contains(TabletFusionChoiceKey(floor))))
             {
+                Save(credits);
+                return false;
+            }
+            if (mutualChoice)
+            {
+                credits.PendingTabletFloors.Add(floor);
                 Save(credits);
                 Plugin.LogInfo($"Current Tablet Fusion unavailable on mutual-choice floor; preserving only Tablet alternative: " +
                                $"player={player.PlayerAvatar?.Name}, floor={ShortGuid(floor)}.");
                 return false;
             }
             credits.Fusions++;
+            credits.CountedFloors.Add(EventKey(floor, "Fusion"));
             AddHistory(credits, "Catch-up: no personal Tablet Fusion spawned @ " + ShortGuid(floor));
             Save(credits);
             Plugin.LogInfo($"Current Tablet Fusion converted for late player: player={player.PlayerAvatar?.Name}, " +
                            $"floor={ShortGuid(floor)}, fusionCredits={credits.Fusions}.");
             return true;
-        }
-
-        private static void RemoveOnePendingSephirite(Credits credits, byte rewardType)
-        {
-            KeyValuePair<uint, PendingSephirite> pending = PendingSephirites.FirstOrDefault(entry =>
-                entry.Value.Credits == credits && entry.Value.RewardType == rewardType);
-            if (pending.Value == null) return;
-            PendingSephirites.Remove(pending.Key);
-            if (rewardType == 4) credits.PendingTablets = Math.Max(0, credits.PendingTablets - 1);
-            else if (rewardType == 6) credits.PendingCharms = Math.Max(0, credits.PendingCharms - 1);
-            if (NetworkServer.spawned.TryGetValue(pending.Key, out NetworkIdentity identity) && identity != null)
-                NetworkServer.Destroy(identity.gameObject);
         }
 
         internal static void SendHello()
@@ -493,6 +512,7 @@ namespace SephiriaTogether
             if (!ShouldTrackUnclaimedFloor(player)) return;
             Credits credits = GetServerCredits(player);
             if (ClearWeaponCreditsIfMaxed(player, credits)) return;
+            if (WasEventProcessed(credits, floorGuid, EFloorMainEventType.Anvil)) return;
             if (!string.IsNullOrEmpty(floorGuid) && credits.PendingAnvilFloors.Add(floorGuid))
             {
                 Plugin.LogInfo($"Pending Anvil floor recorded: player={player?.PlayerAvatar?.Name}, floor={ShortGuid(floorGuid)}, count={credits.PendingAnvilFloors.Count}.");
@@ -509,7 +529,13 @@ namespace SephiriaTogether
             {
                 if (floor == currentFloorGuid) continue;
                 credits.PendingAnvilFloors.Remove(floor);
+                if (WasEventProcessed(credits, floor, EFloorMainEventType.Anvil))
+                {
+                    changed = true;
+                    continue;
+                }
                 credits.Weapons++;
+                credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.Anvil));
                 AddHistory(credits, "Catch-up: unclaimed Anvil @ " + ShortGuid(floor));
                 changed = true;
             }
@@ -526,7 +552,9 @@ namespace SephiriaTogether
             if (credits.PendingAnvilFloors.Count == 0) return;
             foreach (string floor in credits.PendingAnvilFloors)
             {
+                if (WasEventProcessed(credits, floor, EFloorMainEventType.Anvil)) continue;
                 credits.Weapons++;
+                credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.Anvil));
                 AddHistory(credits, "Catch-up: disconnected before claiming Anvil @ " + ShortGuid(floor));
             }
             Plugin.LogInfo($"Converted {credits.PendingAnvilFloors.Count} unclaimed Anvil floor(s) for disconnected player.");
@@ -538,6 +566,7 @@ namespace SephiriaTogether
         {
             if (!ShouldTrackUnclaimedFloor(player)) return;
             Credits credits = GetServerCredits(player);
+            if (WasEventProcessed(credits, floorGuid, EFloorMainEventType.Enchant)) return;
             if (!string.IsNullOrEmpty(floorGuid) && credits.PendingEnchantFloors.Add(floorGuid))
             {
                 Plugin.LogInfo($"Pending Enchant floor recorded: player={player?.PlayerAvatar?.Name}, floor={ShortGuid(floorGuid)}, count={credits.PendingEnchantFloors.Count}.");
@@ -553,7 +582,13 @@ namespace SephiriaTogether
             {
                 if (floor == currentFloorGuid) continue;
                 credits.PendingEnchantFloors.Remove(floor);
+                if (WasEventProcessed(credits, floor, EFloorMainEventType.Enchant))
+                {
+                    changed = true;
+                    continue;
+                }
                 credits.Enchants++;
+                credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.Enchant));
                 AddHistory(credits, "Catch-up: unclaimed Enchant @ " + ShortGuid(floor));
                 changed = true;
             }
@@ -566,12 +601,16 @@ namespace SephiriaTogether
         {
             Credits credits = GetServerCredits(player);
             string floor = player?.PlayerAvatar?.currentFloorGuid;
-            if (!string.IsNullOrEmpty(floor) && credits.PendingEnchantFloors.Remove(floor))
-            {
-                Plugin.LogInfo($"Original Enchant floor claimed: player={player.PlayerAvatar.Name}, floor={ShortGuid(floor)}.");
-                player.SaveCurrentSessionData();
-                Save(credits);
-            }
+            if (string.IsNullOrEmpty(floor)) return;
+            bool removed = credits.PendingEnchantFloors.Remove(floor);
+            if (!removed && !CurrentFloorMatches(player, EFloorMainEventType.Enchant)) return;
+            string eventKey = EventKey(floor, EFloorMainEventType.Enchant);
+            credits.CountedFloors.Add(eventKey);
+            Plugin.LogInfo($"Original Enchant floor claimed: player={player.PlayerAvatar.Name}, floor={ShortGuid(floor)}, " +
+                           $"pendingRemoved={removed}.");
+            AddHistory(credits, "Original Enchant floor claimed @ " + ShortGuid(floor));
+            player.SaveCurrentSessionData();
+            Save(credits);
         }
 
         internal static void RecordPendingChoiceFloor(PlayerSpawner player, string floorGuid, EFloorMainEventType type)
@@ -580,6 +619,7 @@ namespace SephiriaTogether
             Credits credits = GetServerCredits(player);
             if (type == EFloorMainEventType.StoneTablet &&
                 credits.CountedFloors.Contains(TabletFusionChoiceKey(floorGuid))) return;
+            if (WasEventProcessed(credits, floorGuid, type)) return;
             HashSet<string> pending = PendingChoiceSet(credits, type);
             if (pending == null || string.IsNullOrEmpty(floorGuid) || !pending.Add(floorGuid)) return;
             Plugin.LogInfo($"Pending {type} floor recorded: player={player?.PlayerAvatar?.Name}, floor={ShortGuid(floorGuid)}, count={pending.Count}.");
@@ -614,14 +654,24 @@ namespace SephiriaTogether
             HashSet<string> pending = PendingChoiceSet(credits, type);
             string floor = player?.PlayerAvatar?.currentFloorGuid;
             if (pending == null || string.IsNullOrEmpty(floor)) return;
+            bool currentFloorMatches = CurrentFloorMatches(player, type);
             bool claimed = pending.Remove(floor);
             bool fusionAlternative = type == EFloorMainEventType.StoneTablet &&
+                                     (claimed || currentFloorMatches) &&
                                      credits.PendingFusionFloors.Remove(floor);
-            if (!claimed && !fusionAlternative) return;
+            if (!claimed && !fusionAlternative && !currentFloorMatches) return;
+            string eventKey = EventKey(floor, type);
             if (type == EFloorMainEventType.StoneTablet)
-                credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+            {
+                if (fusionAlternative || IsTabletFusionChoiceFloor(floor))
+                    credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+                credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.StoneTablet));
+            }
+            else
+                credits.CountedFloors.Add(eventKey);
             Plugin.LogInfo($"Original {type} floor claimed: player={player.PlayerAvatar.Name}, floor={ShortGuid(floor)}, " +
-                           $"clearedFusionAlternative={fusionAlternative}.");
+                           $"pendingRemoved={claimed}, clearedFusionAlternative={fusionAlternative}.");
+            AddHistory(credits, "Original " + type + " floor claimed @ " + ShortGuid(floor));
             player.SaveCurrentSessionData();
             Save(credits);
         }
@@ -633,7 +683,13 @@ namespace SephiriaTogether
             {
                 if (floor == currentFloorGuid) continue;
                 pending.Remove(floor);
+                if (WasEventProcessed(credits, floor, name))
+                {
+                    changed = true;
+                    continue;
+                }
                 grant();
+                credits.CountedFloors.Add(EventKey(floor, name));
                 AddHistory(credits, "Catch-up: unclaimed " + name + " @ " + ShortGuid(floor));
                 changed = true;
             }
@@ -647,8 +703,17 @@ namespace SephiriaTogether
             {
                 if (floor == currentFloorGuid) continue;
                 credits.PendingTabletFloors.Remove(floor);
-                bool fusionAlternative = credits.PendingFusionFloors.Remove(floor);
-                credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+                bool mutualChoice = IsTabletFusionChoiceFloor(floor);
+                if (WasEventProcessed(credits, floor, EFloorMainEventType.StoneTablet) ||
+                    mutualChoice && credits.CountedFloors.Contains(TabletFusionChoiceKey(floor)))
+                {
+                    if (mutualChoice) credits.PendingFusionFloors.Remove(floor);
+                    changed = true;
+                    continue;
+                }
+                bool fusionAlternative = mutualChoice && credits.PendingFusionFloors.Remove(floor);
+                if (mutualChoice) credits.CountedFloors.Add(TabletFusionChoiceKey(floor));
+                credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.StoneTablet));
                 credits.Tablets++;
                 AddHistory(credits, "Catch-up: unclaimed StoneTablet" +
                     (fusionAlternative ? "/Fusion choice" : "") + " @ " + ShortGuid(floor));
@@ -699,11 +764,16 @@ namespace SephiriaTogether
         {
             Credits credits = GetServerCredits(player);
             string floor = player?.PlayerAvatar?.currentFloorGuid;
-            if (!string.IsNullOrEmpty(floor) && credits.PendingAnvilFloors.Remove(floor))
-            {
-                player.SaveCurrentSessionData();
-                Save(credits);
-            }
+            if (string.IsNullOrEmpty(floor)) return;
+            bool removed = credits.PendingAnvilFloors.Remove(floor);
+            if (!removed && !CurrentFloorMatches(player, EFloorMainEventType.Anvil)) return;
+            string eventKey = EventKey(floor, EFloorMainEventType.Anvil);
+            credits.CountedFloors.Add(eventKey);
+            Plugin.LogInfo($"Original Anvil floor claimed: player={player?.PlayerAvatar?.Name}, " +
+                           $"floor={ShortGuid(floor)}, pendingRemoved={removed}.");
+            AddHistory(credits, "Original Anvil floor claimed @ " + ShortGuid(floor));
+            player.SaveCurrentSessionData();
+            Save(credits);
         }
 
         internal static int AvailableWeaponCredits(PlayerSpawner player)
@@ -877,6 +947,7 @@ namespace SephiriaTogether
             if (connection != null)
             {
                 MoneyTransfer.RemoveConnection(connection);
+                StartProgressSelection.RemoveConnection(connection);
                 AnvilCompensation.RemoveConnection(connection);
                 ChoiceRewardObjects.RemoveConnection(connection);
                 bool hasPersonalFusion = connection.owned.Any(identity =>
@@ -889,7 +960,9 @@ namespace SephiriaTogether
                 {
                     foreach (string floor in credits.PendingAnvilFloors)
                     {
+                        if (WasEventProcessed(credits, floor, EFloorMainEventType.Anvil)) continue;
                         credits.Weapons++;
+                        credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.Anvil));
                         AddHistory(credits, "Catch-up: disconnected before claiming Anvil @ " + ShortGuid(floor));
                     }
                     if (credits.PendingAnvilFloors.Count > 0)
@@ -898,7 +971,9 @@ namespace SephiriaTogether
                     credits.PendingAnvilFloors.Clear();
                     foreach (string floor in credits.PendingEnchantFloors)
                     {
+                        if (WasEventProcessed(credits, floor, EFloorMainEventType.Enchant)) continue;
                         credits.Enchants++;
+                        credits.CountedFloors.Add(EventKey(floor, EFloorMainEventType.Enchant));
                         AddHistory(credits, "Catch-up: disconnected before claiming Enchant @ " + ShortGuid(floor));
                     }
                     if (credits.PendingEnchantFloors.Count > 0)
@@ -907,12 +982,15 @@ namespace SephiriaTogether
                     credits.PendingEnchantFloors.Clear();
                     ConvertChoiceSet(credits.PendingMiracleFloors, null, () => credits.Miracles++, "Miracle", credits);
                     ConvertChoiceSet(credits.PendingCharmFloors, null, () => credits.Charms++, "Charm", credits);
-                    ConvertChoiceSet(credits.PendingTabletFloors, null, () => credits.Tablets++, "StoneTablet", credits);
-                    if (!hasPersonalFusion)
-                        ConvertChoiceSet(credits.PendingFusionFloors, null, () => credits.Fusions++, "Tablet Fusion", credits);
+                    PlayerSpawner disconnected = connection.identity != null
+                        ? connection.identity.GetComponent<PlayerSpawner>()
+                        : null;
+                    if (!hasPersonalFusion) ConvertPendingFusionSet(credits, null, disconnected);
+                    ConvertPendingTabletChoices(credits, null, disconnected);
                     Save(credits);
                 }
                 ServerCredits.Remove(connection.connectionId);
+                ModdedConnections.Remove(connection.connectionId);
             }
         }
 
@@ -957,6 +1035,43 @@ namespace SephiriaTogether
             PersonalizedVisibility.Clear();
         }
 
+        internal static void ClearServerConnectionState()
+        {
+            ModdedConnections.Clear();
+            ClearServerState();
+        }
+
+        internal static void RefreshExistingClientOffers()
+        {
+            if (!NetworkServer.active) return;
+            foreach (NetworkConnectionToClient connection in NetworkServer.connections.Values.ToArray())
+            {
+                if (connection == null || !connection.isReady || !ModdedConnections.Contains(connection.connectionId) ||
+                    connection.identity == null) continue;
+                PlayerSpawner spawner = connection.identity.GetComponent<PlayerSpawner>();
+                Credits credits = Load(spawner?.playerGuid);
+                credits.ClientMod = true;
+                ServerCredits[connection.connectionId] = credits;
+                SendOffer(connection, credits, 0);
+            }
+        }
+
+        internal static void ScheduleExistingClientOffersRefresh()
+        {
+            if (Plugin.InstanceForPatches != null)
+                Plugin.InstanceForPatches.StartCoroutine(RefreshExistingClientOffersWhenReady());
+        }
+
+        private static IEnumerator RefreshExistingClientOffersWhenReady()
+        {
+            float deadline = Time.realtimeSinceStartup + 8f;
+            while (NetworkServer.active && Time.realtimeSinceStartup < deadline)
+            {
+                RefreshExistingClientOffers();
+                yield return new WaitForSeconds(0.25f);
+            }
+        }
+
         private static void OnServerHello(NetworkConnectionToClient connection, CatchUpHelloMessage message)
         {
             PlayerSpawner spawner = connection.identity != null
@@ -970,7 +1085,9 @@ namespace SephiriaTogether
             {
                 ServerCredits[connection.connectionId] = credits = Load(spawner?.playerGuid);
             }
+            else if (MigrateLegacyProcessedFloors(credits)) Save(credits);
             credits.ClientMod = true;
+            ModdedConnections.Add(connection.connectionId);
             SendOffer(connection, credits, 0);
         }
 
@@ -1105,10 +1222,16 @@ namespace SephiriaTogether
             Credits credits = new Credits();
             if (string.IsNullOrWhiteSpace(playerGuid) || SaveManager.CurrentRun == null) return credits;
             string prefix = "SephiriaTogetherCatchUp_" + Hash(playerGuid) + "_";
-            Credits active = PendingSephirites.Values
+            Credits active = ServerCredits.Values
+                .FirstOrDefault(candidate => candidate != null && candidate.SavePrefix == prefix) ??
+                PendingSephirites.Values
                 .Select(pending => pending.Credits)
                 .FirstOrDefault(candidate => candidate != null && candidate.SavePrefix == prefix);
-            if (active != null) return active;
+            if (active != null)
+            {
+                if (MigrateLegacyProcessedFloors(active)) Save(active);
+                return active;
+            }
             credits.SavePrefix = prefix;
             credits.Weapons = Math.Max(0, SaveManager.CurrentRun.GetInt(credits.SavePrefix + "WeaponPending", 0));
             credits.Enchants = Math.Max(0, SaveManager.CurrentRun.GetInt(credits.SavePrefix + "EnchantPending", 0));
@@ -1143,6 +1266,7 @@ namespace SephiriaTogether
                 .Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries));
             credits.CapturedBossRewards.AddRange(SaveManager.CurrentRun.GetString(credits.SavePrefix + "BossOffers", "")
                 .Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries));
+            if (MigrateLegacyProcessedFloors(credits)) Save(credits);
             return credits;
         }
 
@@ -1181,6 +1305,130 @@ namespace SephiriaTogether
             using SHA256 sha = SHA256.Create();
             byte[] bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(value));
             return BitConverter.ToString(bytes, 0, 12).Replace("-", "");
+        }
+
+        private static string EventKey(string floorGuid, EFloorMainEventType type) =>
+            EventKey(floorGuid, type.ToString());
+
+        private static string EventKey(string floorGuid, string type) =>
+            string.IsNullOrEmpty(floorGuid) ? "" : floorGuid + ":" + type;
+
+        private static bool WasEventProcessed(Credits credits, string floorGuid, EFloorMainEventType type) =>
+            WasEventProcessed(credits, floorGuid, type.ToString());
+
+        private static bool WasEventProcessed(Credits credits, string floorGuid, string type) =>
+            credits != null && !string.IsNullOrEmpty(floorGuid) &&
+            (credits.CountedFloors.Contains(EventKey(floorGuid, type)) ||
+             Enum.TryParse(type, out EFloorMainEventType _) && credits.CountedFloors.Contains(floorGuid));
+
+        private static bool WasFusionProcessed(Credits credits, string floorGuid) =>
+            credits != null && !string.IsNullOrEmpty(floorGuid) &&
+            (credits.CountedFloors.Contains(EventKey(floorGuid, "Fusion")) ||
+             credits.CountedFloors.Contains(TabletFusionChoiceKey(floorGuid)) ||
+             IsTabletFusionChoiceFloor(floorGuid) &&
+             WasEventProcessed(credits, floorGuid, EFloorMainEventType.StoneTablet));
+
+        private static bool MigrateLegacyProcessedFloors(Credits credits)
+        {
+            if (credits == null || DungeonManager.Instance == null || credits.History.Count == 0) return false;
+            bool changed = false;
+            HashSet<string> resolvedEvents = new HashSet<string>();
+            foreach (string line in credits.History.AsEnumerable().Reverse())
+            {
+                if (string.IsNullOrEmpty(line)) continue;
+                int marker = line.LastIndexOf(" @ ", StringComparison.Ordinal);
+                if (marker < 0) continue;
+                string shortGuid = line.Substring(marker + 3).Trim();
+                string[] matchingFloors = DungeonManager.Instance.generatedFloors.Keys
+                    .Where(guid => string.Equals(ShortGuid(guid), shortGuid, StringComparison.OrdinalIgnoreCase))
+                    .Take(2)
+                    .ToArray();
+                if (matchingFloors.Length != 1) continue;
+                string floorGuid = matchingFloors[0];
+                if (string.IsNullOrEmpty(floorGuid)) continue;
+
+                if (line.IndexOf("Removed current-floor catch-up:", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    foreach (EFloorMainEventType type in Enum.GetValues(typeof(EFloorMainEventType)))
+                        if (line.IndexOf("Removed current-floor catch-up: " + type,
+                                StringComparison.OrdinalIgnoreCase) >= 0)
+                            resolvedEvents.Add(EventKey(floorGuid, type));
+                    continue;
+                }
+
+                if (line.IndexOf("Catch-up: Boss choices", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("Original Boss choices completed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, "Boss");
+                if (line.IndexOf("unclaimed Anvil", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("disconnected before claiming Anvil", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("Original Anvil floor claimed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, EFloorMainEventType.Anvil);
+                if (line.IndexOf("unclaimed Enchant", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("disconnected before claiming Enchant", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("Original Enchant floor claimed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, EFloorMainEventType.Enchant);
+                if (line.IndexOf("unclaimed Miracle", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("Original Miracle floor claimed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, EFloorMainEventType.Miracle);
+                if (line.IndexOf("unclaimed Charm", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("Original Charm floor claimed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, EFloorMainEventType.Charm);
+                if (line.IndexOf("unclaimed StoneTablet", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("-> StoneTablet", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("Original StoneTablet floor claimed", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, EFloorMainEventType.StoneTablet);
+                if (line.IndexOf("Tablet/Fusion choice", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    line.IndexOf("StoneTablet/Fusion choice", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= credits.CountedFloors.Add(TabletFusionChoiceKey(floorGuid));
+                else if (line.IndexOf("unclaimed Tablet Fusion", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         line.IndexOf("no personal Tablet Fusion", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         line.IndexOf("Original Tablet Fusion used", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                         line.IndexOf("Catch-up: Tablet Fusion", StringComparison.OrdinalIgnoreCase) >= 0)
+                    changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, "Fusion");
+                if (line.IndexOf("Catch-up: ", StringComparison.OrdinalIgnoreCase) >= 0)
+                    foreach (EFloorMainEventType type in Enum.GetValues(typeof(EFloorMainEventType)))
+                        if (line.IndexOf("Catch-up: " + type + " @ ", StringComparison.OrdinalIgnoreCase) >= 0)
+                            changed |= AddLegacyEventMarker(credits, resolvedEvents, floorGuid, type);
+            }
+            if (changed) Plugin.LogInfo("Migrated legacy compensation floor markers from saved history.");
+            return changed;
+        }
+
+        private static bool AddLegacyEventMarker(Credits credits, HashSet<string> resolvedEvents,
+            string floorGuid, EFloorMainEventType type) =>
+            AddLegacyEventMarker(credits, resolvedEvents, floorGuid, type.ToString());
+
+        private static bool AddLegacyEventMarker(Credits credits, HashSet<string> resolvedEvents,
+            string floorGuid, string type)
+        {
+            string key = EventKey(floorGuid, type);
+            if (!resolvedEvents.Add(key)) return false;
+            return credits.CountedFloors.Add(key);
+        }
+
+        private static bool IsLegacyRemovedFloor(Credits credits, string floorGuid, EFloorMainEventType type)
+        {
+            if (credits == null || string.IsNullOrEmpty(floorGuid)) return false;
+            if (type == EFloorMainEventType.Anvil || type == EFloorMainEventType.Enchant ||
+                type == EFloorMainEventType.Miracle || type == EFloorMainEventType.Charm ||
+                type == EFloorMainEventType.StoneTablet)
+                return false;
+            string shortGuid = ShortGuid(floorGuid);
+            return credits.History.Any(line =>
+                !string.IsNullOrEmpty(line) &&
+                line.IndexOf("Removed current-floor catch-up: " + type, StringComparison.OrdinalIgnoreCase) >= 0 &&
+                line.EndsWith(" @ " + shortGuid, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool CurrentFloorMatches(PlayerSpawner player, EFloorMainEventType type)
+        {
+            string floorGuid = player?.PlayerAvatar?.currentFloorGuid;
+            if (string.IsNullOrEmpty(floorGuid)) return false;
+            if (DungeonManager.Instance != null &&
+                DungeonManager.Instance.generatedFloors.TryGetValue(floorGuid, out FloorData data))
+                return data.mainEventType == type;
+            FloorGenerator generator = FloorGenerator.FindByGuid(floorGuid);
+            return generator != null && generator.floorMainEventType == type;
         }
 
         private static void LoadFloorSet(HashSet<string> target, string key)
@@ -1358,7 +1606,8 @@ namespace SephiriaTogether
         {
             PlayerAvatar avatar = player?.PlayerAvatar;
             HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
-            return NetworkServer.active && avatar != null && player.connectionToClient != null && !avatar.IsDead &&
+            return NetworkServer.active && avatar != null && !CloneBotManager.IsBot(player) &&
+                   player.connectionToClient != null && !avatar.IsDead &&
                    !player.isHost && player.connectionToClient != NetworkServer.localConnection &&
                    avatar.isInDungeon > 0 && !string.IsNullOrEmpty(avatar.currentFloorGuid) &&
                    FloorGenerator.FindByGuid(avatar.currentFloorGuid) != null &&
@@ -1410,7 +1659,8 @@ namespace SephiriaTogether
         }
 
         internal static bool IsModdedConnection(NetworkConnectionToClient connection) =>
-            connection != null && ServerCredits.TryGetValue(connection.connectionId, out Credits credits) && credits.ClientMod;
+            connection != null && (ModdedConnections.Contains(connection.connectionId) ||
+                ServerCredits.TryGetValue(connection.connectionId, out Credits credits) && credits.ClientMod);
 
         private static string BuildRules()
         {
@@ -1421,9 +1671,10 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("RuleUngrouped"), OnOff(Plugin.allowUngroupedStageTransition.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleFriendlyFire"), OnOff(Plugin.friendlyFire.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleHealing"), OnOff(Plugin.breathingHeal.Value)) + "\n" +
-                   string.Format(MenuText.Get("RuleAutoRevive"), OnOff(Plugin.autoReviveWhenClear.Value)) + "\n" +
-                   string.Format(MenuText.Get("RuleExpCatchup"), Plugin.catchUpExperienceRatio.Value.ToString("P0")) + "\n" +
-                   string.Format(MenuText.Get("RuleEnemyHp"), Plugin.BaselinePlayersValue,
+                    string.Format(MenuText.Get("RuleAutoRevive"), OnOff(Plugin.autoReviveWhenClear.Value)) + "\n" +
+                    string.Format(MenuText.Get("RuleExpCatchup"), Plugin.catchUpExperienceRatio.Value.ToString("P0")) + "\n" +
+                    string.Format(MenuText.Get("RuleEnemyBase"), Plugin.BaseEnemyMultiplierValue.ToString("0.##") + "x") + "\n" +
+                    string.Format(MenuText.Get("RuleEnemyHp"), Plugin.BaselinePlayersValue,
                        Plugin.HealthPerExtraPlayerValue.ToString("P0"), Plugin.MaximumMultiplierValue > 0f
                            ? Plugin.MaximumMultiplierValue.ToString("0.##") + "x"
                            : MenuText.Get("NoLimit")) + "\n" +
@@ -1448,7 +1699,7 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("DiagnosticConnection"), connection != null ? connection.connectionId.ToString() : "-") + "\n" +
                    string.Format(MenuText.Get("DiagnosticPlayer"), identity) + "\n" +
                    string.Format(MenuText.Get("DiagnosticFloor"), FloorDisplay.Format(floor)) + "\n" +
-                   string.Format(MenuText.Get("DiagnosticPlayers"), PlayerSpawner.MultiplayerList?.Count ?? 0) + "\n" +
+                   string.Format(MenuText.Get("DiagnosticPlayers"), CloneBotManager.RealPlayerCount) + "\n" +
                    BuildOriginalScalingSummary();
         }
 
@@ -1464,7 +1715,7 @@ namespace SephiriaTogether
                 int ferocious = GetHardModeValue("FEROCIOUSCLAWS");
                 int bloodFestival = GetHardModeValue("BLOODFESTIVAL");
                 int bossHeal = KeywordDatabase.GetConstValue("hardModeBloodFestivalHealBossAndMiniboss");
-                int players = Math.Max(1, PlayerSpawner.MultiplayerList?.Count ?? 1);
+                int players = CloneBotManager.RealPlayerCount;
                 float partyScale = players == 2 ? 0.66f : players == 3 ? 0.5f : players == 4 ? 0.33f : players >= 5 ? 0.25f : 1f;
                 return string.Format(MenuText.Get("VanillaHpSummary"), normal, miniboss, boss) + "\n" +
                        string.Format(MenuText.Get("HardModeSummary"), hardPoints,
@@ -1532,6 +1783,7 @@ namespace SephiriaTogether
         {
             if (!NetworkServer.active || controller?.UnitAvatar == null || candidates == null) return;
             PlayerSpawner spawner = controller.UnitAvatar.GetComponent<PlayerSpawner>();
+            if (CloneBotManager.IsBot(spawner)) return;
             Credits credits = GetServerCredits(spawner);
             foreach (MiracleMetadata candidate in candidates)
             {
@@ -1547,7 +1799,8 @@ namespace SephiriaTogether
             foreach (BossRewardSpawner.GeneratedRewardInfo reward in spawner.generatedRewards)
             {
                 PlayerSpawner player = PlayerSpawner.MultiplayerList?.FirstOrDefault(item =>
-                    item != null && item.currentPlayerIdxForSave == reward.playerIndex);
+                    item != null && !CloneBotManager.IsBot(item) &&
+                    item.currentPlayerIdxForSave == reward.playerIndex);
                 if (player == null) continue;
                 Credits credits = GetServerCredits(player);
                 if (!string.IsNullOrEmpty(reward.rewardName) && !credits.CapturedBossRewards.Contains(reward.rewardName))
@@ -1574,7 +1827,8 @@ namespace SephiriaTogether
             BossRewardSessions.Remove(spawner.netId);
             HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
             bool partyWiped = PlayerSpawner.MultiplayerList != null && PlayerSpawner.MultiplayerList
-                .Where(player => player?.PlayerAvatar != null && player.PlayerAvatar.isInDungeon > 0)
+                .Where(player => player?.PlayerAvatar != null && !CloneBotManager.IsBot(player) &&
+                                 player.PlayerAvatar.isInDungeon > 0)
                 .All(player => player.PlayerAvatar.IsDead);
             if ((DungeonManager.Instance != null && DungeonManager.Instance.isGiveUpRun) ||
                 (manager != null && manager.selfLeaveToGameOver) || partyWiped)
@@ -1586,13 +1840,14 @@ namespace SephiriaTogether
             {
                 int selected = spawner.acquiredRewardEachPlayer.TryGetValue(player.Value, out int count) ? count : 0;
                 int remaining = Mathf.Clamp(2 - selected, 0, 2);
-                if (remaining == 0) continue;
                 Credits credits = Load(player.Key);
                 string bossKey = session.FloorGuid + ":Boss";
                 if (!string.IsNullOrEmpty(session.FloorGuid) && credits.CountedFloors.Contains(bossKey)) continue;
-                credits.Bosses += remaining;
+                if (remaining > 0) credits.Bosses += remaining;
                 if (!string.IsNullOrEmpty(session.FloorGuid)) credits.CountedFloors.Add(bossKey);
-                AddHistory(credits, $"Catch-up: unclaimed Boss choices +{remaining} @ {ShortGuid(session.FloorGuid)}");
+                AddHistory(credits, remaining > 0
+                    ? $"Catch-up: unclaimed Boss choices +{remaining} @ {ShortGuid(session.FloorGuid)}"
+                    : $"Original Boss choices completed @ {ShortGuid(session.FloorGuid)}");
                 Save(credits);
                 Plugin.LogInfo($"Boss reward remainder converted: player={ShortGuid(player.Key)}, floor={ShortGuid(session.FloorGuid)}, " +
                                $"selected={selected}, granted={remaining}.");
@@ -1607,10 +1862,16 @@ namespace SephiriaTogether
             if (spawner?.connectionToClient != null &&
                 ServerCredits.TryGetValue(spawner.connectionToClient.connectionId, out Credits credits) &&
                 expectedPrefix != null && credits.SavePrefix == expectedPrefix)
+            {
+                if (MigrateLegacyProcessedFloors(credits)) Save(credits);
                 return credits;
+            }
             credits = Load(spawner?.playerGuid);
             if (spawner?.connectionToClient != null)
+            {
+                credits.ClientMod = ModdedConnections.Contains(spawner.connectionToClient.connectionId);
                 ServerCredits[spawner.connectionToClient.connectionId] = credits;
+            }
             return credits;
         }
     }
@@ -1655,7 +1916,7 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(HorayNetworkManager), "OnStopServer")]
     internal static class CatchUpServerCleanupPatch
     {
-        private static void Postfix() => CatchUpRewards.ClearServerState();
+        private static void Postfix() => CatchUpRewards.ClearServerConnectionState();
     }
 
     [HarmonyPatch(typeof(MiracleSelector2), "GenerateMiracles")]
@@ -1688,5 +1949,11 @@ namespace SephiriaTogether
     internal static class CatchUpNewRunCleanupPatch
     {
         private static void Prefix() => CatchUpRewards.ClearServerState();
+
+        private static void Postfix()
+        {
+            StartProgressSelection.Clear();
+            CatchUpRewards.ScheduleExistingClientOffersRefresh();
+        }
     }
 }

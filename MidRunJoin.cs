@@ -300,7 +300,8 @@ namespace SephiriaTogether
             }
 
             PlayerSpawner routeSource = PlayerSpawner.MultiplayerList
-                .Where(peer => peer != null && peer != spawner && peer.PlayerAvatar != null)
+                .Where(peer => peer != null && peer != spawner && peer.PlayerAvatar != null &&
+                               !CloneBotManager.IsBot(peer))
                 .OrderByDescending(peer => peer.PlayerAvatar.floorTravelHistory.Count)
                 .ThenByDescending(peer => peer.isHost)
                 .FirstOrDefault();
@@ -308,7 +309,8 @@ namespace SephiriaTogether
             List<string> missedFloors = routeSource != null
                 ? routeSource.PlayerAvatar.floorTravelHistory
                     .Where(guid => !string.IsNullOrEmpty(guid) &&
-                        guid != routeSource.PlayerAvatar.currentFloorGuid && !newcomerHistory.Contains(guid))
+                        guid != routeSource.PlayerAvatar.currentFloorGuid &&
+                        guid != spawner.PlayerAvatar.currentFloorGuid && !newcomerHistory.Contains(guid))
                     .Distinct()
                     .ToList()
                 : new List<string>();
@@ -323,7 +325,7 @@ namespace SephiriaTogether
             List<int> peerMaxDice = new List<int>();
             foreach (PlayerSpawner peer in PlayerSpawner.MultiplayerList)
             {
-                if (peer == null || peer == spawner || peer.PlayerAvatar == null ||
+                if (peer == null || peer == spawner || peer.PlayerAvatar == null || CloneBotManager.IsBot(peer) ||
                     peer.PlayerAvatar.isInDungeon <= 0 ||
                     peer.PlayerAvatar.currentFloorGuid != spawner.PlayerAvatar.currentFloorGuid)
                 {
@@ -492,6 +494,7 @@ namespace SephiriaTogether
 
             PlayerAvatar peer = PlayerSpawner.MultiplayerList
                 .Where(candidate => candidate != null && candidate != newcomer && candidate.PlayerAvatar != null &&
+                    !CloneBotManager.IsBot(candidate) &&
                     candidate.PlayerAvatar.currentFloorGuid == newcomer.PlayerAvatar.currentFloorGuid &&
                     area.Contains(candidate.PlayerAvatar.transform.position))
                 .OrderBy(candidate => candidate.PlayerAvatar.IsDead)
@@ -644,10 +647,6 @@ namespace SephiriaTogether
                             $"player={player?.PlayerAvatar?.Name ?? "-"}, address={address}, " +
                             $"ready={conn?.isReady ?? false}, players={PlayerSpawner.MultiplayerList?.Count ?? 0}, " +
                            $"connections={NetworkServer.connections.Count}, creatures={creatures}.");
-        }
-
-        private static void Postfix(NetworkConnectionToClient conn)
-        {
             MidRunJoin.RemoveConnection(conn);
         }
     }
@@ -695,18 +694,142 @@ namespace SephiriaTogether
     }
 
     [HarmonyPatch(typeof(DropItemOnDie), nameof(DropItemOnDie.DropEXP))]
-    internal static class OrphanExperienceCleanupPatch
+    internal static class SafeExperienceDropPatch
     {
-        private static void Postfix()
+        private static readonly AccessTools.FieldRef<DropItemOnDie, bool> AlreadyDropped =
+            AccessTools.FieldRefAccess<DropItemOnDie, bool>("isEXPAlreadyDropped");
+
+        private static bool Prefix(DropItemOnDie __instance, int exp)
         {
-            if (!NetworkServer.active || Exp.managedExpInstances == null) return;
-            foreach (GameObject instance in Exp.managedExpInstances.ToArray())
+            if (__instance == null || !NetworkServer.active || !__instance.isServer) return true;
+            if (AlreadyDropped(__instance)) return false;
+            AlreadyDropped(__instance) = true;
+            try
             {
-                if (instance == null || !instance.TryGetComponent(out Exp exp) || exp.target != null) continue;
-                NetworkServer.Destroy(instance);
-                Exp.managedExpInstances.Remove(instance);
-                Plugin.LogInfo("Removed orphan EXP created for a connection without an initialized player.");
+                NetworkConnectionToClient[] snapshot = NetworkServer.connections.Values.ToArray();
+                List<KeyValuePair<NetworkConnectionToClient, PlayerAvatar>> recipients = new List<KeyValuePair<NetworkConnectionToClient, PlayerAvatar>>();
+                foreach (NetworkConnectionToClient connection in snapshot)
+                {
+                    if (connection == null || !connection.isAuthenticated || !connection.isReady ||
+                        connection.identity == null || connection.identity.netId == 0)
+                    {
+                        continue;
+                    }
+
+                    PlayerAvatar player = null;
+                    try
+                    {
+                        player = connection.identity.GetComponent<PlayerAvatar>();
+                    }
+                    catch (Exception exception)
+                    {
+                        Plugin.LogInfo($"Safe EXP recipient inspection failed for connection " +
+                                       $"{connection.connectionId}: {exception.Message}");
+                    }
+
+                    if (player != null && player.spawner != null && !CloneBotManager.IsBot(player.spawner) &&
+                        player.isInDungeon > 0 && !string.IsNullOrEmpty(player.currentFloorGuid))
+                        recipients.Add(new KeyValuePair<NetworkConnectionToClient, PlayerAvatar>(connection, player));
+                }
+                if (recipients.Count == 0)
+                {
+                    Plugin.LogInfo("Skipped EXP drop because no initialized in-dungeon player connection was ready.");
+                    return false;
+                }
+
+                GameObject largePrefab = Resources.Load<GameObject>("Exp");
+                GameObject smallPrefab = Resources.Load<GameObject>("ExpMini");
+                int divisor = Mathf.Clamp(recipients.Count, 1, 3);
+                int spawned = 0;
+                int failed = 0;
+                foreach (KeyValuePair<NetworkConnectionToClient, PlayerAvatar> recipient in recipients)
+                {
+                    int adjusted = exp;
+                    try
+                    {
+                        adjusted += (int)(exp * (recipient.Value.GetCustomStat(ECustomStat.EXPDrop) / 100f));
+                    }
+                    catch (Exception exception)
+                    {
+                        Plugin.LogInfo($"Safe EXP stat lookup failed for connection " +
+                                       $"{recipient.Key.connectionId}: {exception.Message}");
+                    }
+                    for (int remaining = Math.Max(0, adjusted); remaining > 0; remaining -= 100)
+                    {
+                        int chunk = Math.Min(remaining, 100);
+                        GameObject prefab = chunk < 100 ? smallPrefab : largePrefab;
+                        if (prefab == null)
+                        {
+                            failed++;
+                            continue;
+                        }
+                        GameObject instance = null;
+                        try
+                        {
+                            Vector3 position = __instance.transform.position;
+                            position.z = 0f;
+                            instance = UnityEngine.Object.Instantiate(prefab, position, Quaternion.identity);
+                            Exp experience = instance.GetComponent<Exp>();
+                            if (experience == null)
+                            {
+                                DestroyFailedExperience(instance);
+                                failed++;
+                                continue;
+                            }
+                            experience.target = recipient.Value;
+                            experience.amount = Mathf.RoundToInt((float)chunk / divisor);
+                            if (experience.amount <= 0)
+                            {
+                                DestroyFailedExperience(instance);
+                                failed++;
+                                continue;
+                            }
+                            experience.ignoreAdjustment = true;
+                            NetworkServer.Spawn(instance, recipient.Key);
+                            experience.AddPhysicalForce(UnityEngine.Random.insideUnitCircle * 3f,
+                                UnityEngine.Random.Range(3f, 5f));
+                            spawned++;
+                        }
+                        catch (Exception exception)
+                        {
+                            DestroyFailedExperience(instance);
+                            failed++;
+                            Plugin.LogInfo($"Safe EXP object creation failed for connection " +
+                                           $"{recipient.Key.connectionId}: {exception.Message}");
+                        }
+                    }
+                }
+                Plugin.LogInfo($"Safe EXP drop: eligible={recipients.Count}, divisor={divisor}, " +
+                               $"connections={snapshot.Length}, excluded={snapshot.Length - recipients.Count}, " +
+                               $"spawned={spawned}, failed={failed}, base={exp}.");
+                return false;
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogInfo("Safe EXP drop failed without interrupting unit death: " + exception);
+                return false;
             }
         }
+
+        private static void DestroyFailedExperience(GameObject instance)
+        {
+            if (instance == null) return;
+            try
+            {
+                NetworkIdentity identity = instance.GetComponent<NetworkIdentity>();
+                if (identity != null && identity.netId != 0) NetworkServer.Destroy(instance);
+                else UnityEngine.Object.Destroy(instance);
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogInfo("Safe EXP cleanup failed: " + exception.Message);
+                UnityEngine.Object.Destroy(instance);
+            }
+
+            if (Exp.managedExpInstances != null)
+                Exp.managedExpInstances.RemoveAll(candidate =>
+                    candidate == null || ReferenceEquals(candidate, instance));
+        }
+
     }
 }

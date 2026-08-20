@@ -108,8 +108,11 @@ namespace SephiriaTogether
         {
             PlayerSpawner player = sender?.identity != null ? sender.identity.GetComponent<PlayerSpawner>() : null;
             if (altar == null || player == null) return;
-            CatchUpRewards.MarkCurrentEnchantClaimed(player);
-            if (!Enchants.TryGetValue(altar.netId, out PlayerSpawner owner) || owner != player) return;
+            if (!Enchants.TryGetValue(altar.netId, out PlayerSpawner owner) || owner != player)
+            {
+                CatchUpRewards.MarkCurrentEnchantClaimed(player);
+                return;
+            }
             PersonalizedVisibility.Unregister(altar.netIdentity);
             Enchants.Remove(altar.netId);
             CatchUpRewards.CompleteEnchantCredit(player);

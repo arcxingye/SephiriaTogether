@@ -42,7 +42,8 @@ namespace SephiriaTogether
         internal static void Update()
         {
             PlayerAvatar local = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
-            if (Plugin.rescueShortcut.Value.IsDown() && local != null && local.IsDead &&
+            if (Plugin.IsShortcutBound(Plugin.rescueShortcut.Value) &&
+                Plugin.rescueShortcut.Value.IsDown() && local != null && local.IsDead &&
                 CatchUpRewards.HostSupportsProtocol())
             {
                 NetworkClient.Send(new RescueRequestMessage());
@@ -53,6 +54,7 @@ namespace SephiriaTogether
             HashSet<uint> current = new HashSet<uint>();
             foreach (PlayerSpawner spawner in PlayerSpawner.MultiplayerList)
             {
+                if (CloneBotManager.IsBot(spawner)) continue;
                 PlayerAvatar player = spawner != null ? spawner.PlayerAvatar : null;
                 if (player == null || player == local || !player.IsDead) continue;
                 current.Add(player.netId);
@@ -80,7 +82,8 @@ namespace SephiriaTogether
         {
             PlayerAvatar local = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
             PlayerAvatar down = PlayerSpawner.MultiplayerList?
-                .Where(spawner => spawner?.PlayerAvatar != null && spawner.PlayerAvatar != local &&
+                .Where(spawner => spawner?.PlayerAvatar != null && !CloneBotManager.IsBot(spawner) &&
+                                  spawner.PlayerAvatar != local &&
                     spawner.PlayerAvatar.IsDead && KnownDownPlayers.Contains(spawner.PlayerAvatar.netId))
                 .Select(spawner => spawner.PlayerAvatar)
                 .FirstOrDefault();

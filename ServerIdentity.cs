@@ -83,6 +83,7 @@ namespace SephiriaTogether
         private static void Prefix(UnitAvatar __instance, int hitLevel, DamageInstance diedFrom)
         {
             if (!NetworkServer.active || !(__instance is PlayerAvatar player)) return;
+            if (CloneBotManager.IsBot(player.spawner)) return;
             Plugin.LogInfo($"Player Die called: name={player.Name}, netId={player.netId}, hitLevel={hitLevel}, " +
                            $"alreadyDead={player.IsDead}, hp={player.hp:0.##}, floor={Short(player.currentFloorGuid)}, pos={player.transform.position}, " +
                            $"damageNull={diedFrom == null}.");
@@ -99,6 +100,7 @@ namespace SephiriaTogether
         private static void Prefix(UnitAvatar __instance, float hpAmount)
         {
             if (!NetworkServer.active || !(__instance is PlayerAvatar player)) return;
+            if (CloneBotManager.IsBot(player.spawner)) return;
             Plugin.LogInfo($"Player Revive called: name={player.Name}, netId={player.netId}, amount={hpAmount:0.##}, " +
                            $"wasDead={player.IsDead}, hp={player.hp:0.##}, floor={Short(player.currentFloorGuid)}, pos={player.transform.position}.");
         }

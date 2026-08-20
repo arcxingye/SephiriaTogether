@@ -93,8 +93,8 @@ namespace SephiriaTogether
             {
                 Plugin.LogInfo(
                     $"Bypassing stage entrance session check: lobby={manager.MemberCount}, " +
-                    $"session={PlayerSpawner.MultiplayerList.Count}.");
-                return PlayerSpawner.MultiplayerList.Count;
+                    $"session={CloneBotManager.RealPlayerCount}.");
+                return CloneBotManager.RealPlayerCount;
             }
             return manager.MemberCount;
         }

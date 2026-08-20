@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.6.0
+
+- Add a host-only starting story progress picker for unstarted runs. Online real players are sorted from lowest to highest main-quest progress, with chapter-aware ordering for late-game progress; applying a selection rebuilds the run through the vanilla restart path without changing personal saves.
+- Add validated progress reports, protocol version separation, and reconnect-safe Mod handshake state across an in-place run restart.
+- Harden catch-up idempotency migration, connection-time EXP dropping, manual inventory arrangement guards, and disconnect cleanup.
+- Reduce AFK autopilot frame cost by caching battle-trigger scans, consuming door path refreshes once, limiting unreachable-target path attempts, reducing hot-path allocations, and throttling diagnostics.
+
 ## 3.5.2
 
 - Add host-validated player-to-player Leaf transfers with an F8 recipient list, amount entry, confirmation, balance checks, atomic server updates, persistence, and sender/recipient notifications.

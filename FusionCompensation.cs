@@ -104,8 +104,11 @@ namespace SephiriaTogether
         internal static void Complete(TabletMix mix, PlayerSpawner player)
         {
             if (mix == null || player == null) return;
-            CatchUpRewards.MarkCurrentFusionClaimed(player);
-            if (!SpawnedFor.TryGetValue(mix.netId, out PlayerSpawner owner) || owner != player) return;
+            if (!SpawnedFor.TryGetValue(mix.netId, out PlayerSpawner owner) || owner != player)
+            {
+                CatchUpRewards.MarkCurrentFusionClaimed(player);
+                return;
+            }
             PersonalizedVisibility.Unregister(mix.netIdentity);
             SpawnedFor.Remove(mix.netId);
             CatchUpRewards.CompleteFusionCredit(player);

@@ -22,7 +22,7 @@ namespace SephiriaTogether
             }
 
             PlayerAvatar[] players = PlayerSpawner.MultiplayerList
-                .Where(spawner => spawner?.PlayerAvatar != null)
+                .Where(spawner => spawner?.PlayerAvatar != null && !CloneBotManager.IsBot(spawner))
                 .Select(spawner => spawner.PlayerAvatar)
                 .Where(player => player.isInDungeon > 0 && !string.IsNullOrEmpty(player.currentFloorGuid))
                 .ToArray();
@@ -72,7 +72,7 @@ namespace SephiriaTogether
                 return false;
             if (IsGivingUp()) return false;
             PlayerAvatar[] players = PlayerSpawner.MultiplayerList
-                .Where(spawner => spawner?.PlayerAvatar != null)
+                .Where(spawner => spawner?.PlayerAvatar != null && !CloneBotManager.IsBot(spawner))
                 .Select(spawner => spawner.PlayerAvatar)
                 .Where(player => player.isInDungeon > 0 && !string.IsNullOrEmpty(player.currentFloorGuid))
                 .ToArray();

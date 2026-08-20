@@ -58,7 +58,8 @@ namespace SephiriaTogether
 
         internal static void OnFloorChanged(PlayerAvatar player, string floorGuid)
         {
-            if (!NetworkServer.active || player?.spawner == null || string.IsNullOrEmpty(floorGuid)) return;
+            if (!NetworkServer.active || player?.spawner == null || CloneBotManager.IsBot(player.spawner) ||
+                string.IsNullOrEmpty(floorGuid)) return;
             Plugin.LogInfo($"Floor changed: player={player.Name}, floor={Short(floorGuid)}, pos={player.transform.position}, " +
                            $"dead={player.IsDead}, event={FloorEvent(floorGuid)}.");
             if (CatchUpRewards.IsWeaponFullyEnhanced(player.spawner)) RemoveForMaxedWeapon(player.spawner);
@@ -219,11 +220,14 @@ namespace SephiriaTogether
         {
             PlayerSpawner player = sender?.identity != null ? sender.identity.GetComponent<PlayerSpawner>() : null;
             if (player == null) return;
-            CatchUpRewards.MarkCurrentAnvilClaimed(player);
             bool compensation = SpawnedFor.TryGetValue(anvil.netId, out PlayerSpawner owner) && owner == player;
             Plugin.LogInfo($"Anvil completion observed: player={player.PlayerAvatar?.Name}, netId={anvil.netId}, " +
                            $"compensation={compensation}.");
-            if (!compensation) return;
+            if (!compensation)
+            {
+                CatchUpRewards.MarkCurrentAnvilClaimed(player);
+                return;
+            }
             PersonalizedVisibility.Unregister(anvil.netIdentity);
             SpawnedFor.Remove(anvil.netId);
             CatchUpRewards.CompleteWeaponCredit(player);
@@ -318,8 +322,14 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(Anvil), "UserCode_CmdMarkEnhanced__NetworkConnectionToClient")]
     internal static class CompleteCompensationAnvilPatch
     {
-        private static void Postfix(Anvil __instance, NetworkConnectionToClient sender) =>
-            AnvilCompensation.MarkClaimed(__instance, sender);
+        private static void Prefix(Anvil __instance, out int __state) =>
+            __state = __instance != null ? __instance.enhancedGuidHashes.Count : 0;
+
+        private static void Postfix(Anvil __instance, NetworkConnectionToClient sender, int __state)
+        {
+            if (__instance != null && __instance.enhancedGuidHashes.Count > __state)
+                AnvilCompensation.MarkClaimed(__instance, sender);
+        }
     }
 
     [HarmonyPatch(typeof(Anvil), "OnDestroy")]
