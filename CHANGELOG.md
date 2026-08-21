@@ -8,7 +8,7 @@
 - Add query/response LAN discovery on UDP `7780`. Refreshing the original room list searches broadcasts and up to two local `/24` subnets, and confirmed IP rooms appear as native room-list entries.
 - Make confirmed IP hosts enter the original joined-room page and MultiZone immediately, advertise only after confirmation, close cleanly, and accept remote players without Steam lobby metadata.
 - Restore IP-player HUD entries, health/mana bars, world names, and safe UI cleanup directly from Mirror player objects instead of Steam lobby membership.
-- Keep explicit manual inventory arrangement through the game's original server-authoritative arranger, with no automatic trigger in this plugin; refresh local inventory icons after completion.
+- Remove the inventory arrangement button, arranger invocation, synchronization guard, and inventory-icon refresh code from Sephiria Together.
 - Fix menu shortcut rebinding so the F8 fallback applies only to an exact unmodified F8 binding and combinations such as `Alt+F8` wait for the non-modifier key before saving.
 - Rebuild the F8 menu around exact-width navigation grids, a fixed host sub-navigation row, one shared scroll area, and a stable footer; narrow windows stack long labels and actions instead of squeezing or misaligning them.
 - Clarify save labels as the save currently in use, automatic game backups, and manual backups created by this Mod.

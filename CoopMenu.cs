@@ -73,7 +73,6 @@ namespace SephiriaTogether
                     blockedController.BlockAvatarInput = true;
                 }
                 playerLimitText = PlayerLimit.CurrentLimit.ToString();
-                ManualInventoryArrangement.ClearStatus();
                 SaveManagement.Refresh();
             }
             else
@@ -172,8 +171,6 @@ namespace SephiriaTogether
                 BeginSection(MenuText.Get("LocalShortcuts"));
                 DrawLocalShortcutSettings();
                 EndSection();
-                DrawManualInventoryArrangementControls();
-
                 BeginSection(MenuText.Get("Multiplayer"));
                 if (JoinProgressBypass.CanCreateLobbyForCurrentRun())
                 {
@@ -688,22 +685,6 @@ namespace SephiriaTogether
             }
         }
 
-        private static void DrawManualInventoryArrangementControls()
-        {
-            BeginSection(MenuText.Get("ManualArrangeInventorySection"));
-            GUILayout.Label(MenuText.Get("ManualArrangeInventoryHelp"), muted);
-            GUI.enabled = ManualInventoryArrangement.CanArrange;
-            if (GUILayout.Button(MenuText.Get("ManualArrangeInventory"), primaryButton, GUILayout.Height(32f)))
-            {
-                ManualInventoryArrangement.ClearStatus();
-                ManualInventoryArrangement.ArrangeNow();
-            }
-            GUI.enabled = true;
-            if (!string.IsNullOrEmpty(ManualInventoryArrangement.Status))
-                GUILayout.Label(ManualInventoryArrangement.Status, muted);
-            EndSection();
-        }
-
         private static void DrawClientPage()
         {
             CatchUpRewards.SendHello();
@@ -716,7 +697,6 @@ namespace SephiriaTogether
                 BeginSection(MenuText.Get("LocalShortcuts"));
                 DrawLocalShortcutSettings();
                 EndSection();
-                DrawManualInventoryArrangementControls();
                 DrawDirectConnectControls();
             }
             BeginSection(heading);
