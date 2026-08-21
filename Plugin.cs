@@ -39,8 +39,6 @@ namespace SephiriaTogether
         internal static ConfigEntry<bool> directModeEnabled;
         internal static ConfigEntry<int> directPort;
         private Harmony harmony;
-        private bool lastF8Held;
-        private float nextShortcutToggle;
 
         private void Awake()
         {
@@ -200,18 +198,6 @@ namespace SephiriaTogether
         internal static void LogInfo(string message) =>
             Instance?.Logger.LogInfo($"[{DateTime.Now:HH:mm:ss.fff}] {message}");
 
-        private static bool UsesUnmodifiedKey(KeyboardShortcut shortcut, KeyCode key) =>
-            shortcut.MainKey == key && !shortcut.Modifiers.Any();
-
-        private static bool NoShortcutModifiersHeld()
-        {
-            return !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl) &&
-                   !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt) &&
-                   !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift) &&
-                   !Input.GetKey(KeyCode.LeftCommand) && !Input.GetKey(KeyCode.RightCommand) &&
-                   !Input.GetKey(KeyCode.LeftWindows) && !Input.GetKey(KeyCode.RightWindows);
-        }
-
         private void CleanRemovedSettings()
         {
             bool saveOnSet = Config.SaveOnConfigSet;
@@ -275,6 +261,7 @@ namespace SephiriaTogether
 
         private void OnGUI()
         {
+            HandleMenuShortcutEvent();
             RescueAlerts.Draw();
             VersionReminder.Draw();
             CoopMenu.Draw();
@@ -282,23 +269,41 @@ namespace SephiriaTogether
 
         private void Update()
         {
-            bool f8Held = UsesUnmodifiedKey(menuShortcut.Value, KeyCode.F8) &&
-                          NoShortcutModifiersHeld() &&
-                          Keyboard.current != null && Keyboard.current.f8Key.isPressed;
-            bool fallbackF8Pressed = f8Held && !lastF8Held;
-            lastF8Held = f8Held;
-            bool menuPressed = menuShortcut.Value.IsDown() || fallbackF8Pressed;
-            if (Time.unscaledTime >= nextShortcutToggle && !CoopMenu.IsCapturingShortcut && menuPressed)
-            {
-                LogInfo($"Shortcut pressed: menu={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
-                CoopMenu.Toggle();
-                nextShortcutToggle = Time.unscaledTime + 0.35f;
-            }
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
             MoneyTransfer.Tick();
             StartProgressSelection.Tick();
             LanRoomDiscovery.Tick();
+        }
+
+        private static void HandleMenuShortcutEvent()
+        {
+            Event current = Event.current;
+            if (CoopMenu.IsCapturingShortcut || current == null || current.type != EventType.KeyDown ||
+                !MatchesShortcut(menuShortcut.Value, current)) return;
+            current.Use();
+            LogInfo($"Shortcut pressed: menu={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
+            CoopMenu.Toggle();
+        }
+
+        private static bool MatchesShortcut(KeyboardShortcut shortcut, Event current)
+        {
+            if (shortcut.MainKey == KeyCode.None || current.keyCode != shortcut.MainKey) return false;
+            bool control = false;
+            bool shift = false;
+            bool alt = false;
+            bool command = false;
+            foreach (KeyCode modifier in shortcut.Modifiers)
+            {
+                if (modifier == KeyCode.LeftControl || modifier == KeyCode.RightControl) control = true;
+                else if (modifier == KeyCode.LeftShift || modifier == KeyCode.RightShift) shift = true;
+                else if (modifier == KeyCode.LeftAlt || modifier == KeyCode.RightAlt) alt = true;
+                else if (modifier == KeyCode.LeftCommand || modifier == KeyCode.RightCommand ||
+                         modifier == KeyCode.LeftWindows || modifier == KeyCode.RightWindows) command = true;
+                else return false;
+            }
+            return current.control == control && current.shift == shift && current.alt == alt &&
+                   current.command == command;
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)

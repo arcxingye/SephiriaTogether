@@ -3,6 +3,7 @@ using Mirror;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine.InputSystem;
 
 namespace SephiriaTogether
 {
@@ -640,7 +641,14 @@ namespace SephiriaTogether
         private static KeyCode PressedModifier(bool active, KeyCode left, KeyCode right)
         {
             if (!active) return KeyCode.None;
-            return Input.GetKey(right) ? right : left;
+            Keyboard keyboard = Keyboard.current;
+            if (keyboard != null)
+            {
+                if (right == KeyCode.RightControl && keyboard.rightCtrlKey.isPressed) return right;
+                if (right == KeyCode.RightShift && keyboard.rightShiftKey.isPressed) return right;
+                if (right == KeyCode.RightAlt && keyboard.rightAltKey.isPressed) return right;
+            }
+            return left;
         }
 
         private static void DrawLocalShortcutSettings()
