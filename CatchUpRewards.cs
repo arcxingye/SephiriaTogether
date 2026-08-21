@@ -136,7 +136,6 @@ namespace SephiriaTogether
             NetworkServer.RegisterHandler<CatchUpClaimMessage>(OnServerClaim, true);
             MidRunJoin.RegisterServerMessages();
             RescueAlerts.RegisterServerMessages();
-            AutoPilot.RegisterServerMessages();
             MoneyTransfer.RegisterServerMessages();
             StartProgressSelection.RegisterServerMessages();
         }
@@ -146,7 +145,6 @@ namespace SephiriaTogether
             ConfigureSerialization();
             NetworkClient.RegisterHandler<CatchUpOfferMessage>(OnClientOffer, true);
             RescueAlerts.RegisterClientMessages();
-            AutoPilot.RegisterClientMessages();
             MoneyTransfer.RegisterClientMessages();
             StartProgressSelection.RegisterClientMessages();
         }
@@ -221,7 +219,7 @@ namespace SephiriaTogether
 
         internal static void Prepare(PlayerSpawner newcomer, IEnumerable<string> missedFloors)
         {
-            if (!NetworkServer.active || CloneBotManager.IsBot(newcomer) || newcomer?.connectionToClient == null ||
+            if (!NetworkServer.active || newcomer?.connectionToClient == null ||
                 newcomer.PlayerAvatar == null || DungeonManager.Instance == null)
             {
                 return;
@@ -354,7 +352,6 @@ namespace SephiriaTogether
         internal static bool ShouldTrackUnclaimedFloor(PlayerSpawner player)
         {
             if (!NetworkServer.active || player?.PlayerAvatar == null || player.connectionToClient == null) return false;
-            if (CloneBotManager.IsBot(player)) return false;
             return !player.isHost && player.connectionToClient != NetworkServer.localConnection;
         }
 
@@ -362,7 +359,6 @@ namespace SephiriaTogether
         {
             if (!NetworkServer.active || player == null ||
                 !player.isHost && player.connectionToClient != NetworkServer.localConnection) return;
-            if (CloneBotManager.IsBot(player)) return;
             Credits credits = GetServerCredits(player);
             int removed = credits.PendingAnvilFloors.Count + credits.PendingEnchantFloors.Count +
                           credits.PendingMiracleFloors.Count + credits.PendingCharmFloors.Count +
@@ -376,7 +372,7 @@ namespace SephiriaTogether
             credits.PendingFusionFloors.Clear();
             AddHistory(credits, $"Discarded {removed} local/host reward-floor marker(s)");
             Plugin.LogInfo($"Discarded ineligible local reward-floor markers: player={player?.PlayerAvatar?.Name}, " +
-                           $"count={removed}, host={player?.isHost}, party={CloneBotManager.RealPlayerCount}.");
+                           $"count={removed}, host={player?.isHost}, party={Plugin.PlayerCount}.");
             Save(credits);
         }
 
@@ -1606,7 +1602,7 @@ namespace SephiriaTogether
         {
             PlayerAvatar avatar = player?.PlayerAvatar;
             HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
-            return NetworkServer.active && avatar != null && !CloneBotManager.IsBot(player) &&
+            return NetworkServer.active && avatar != null &&
                    player.connectionToClient != null && !avatar.IsDead &&
                    !player.isHost && player.connectionToClient != NetworkServer.localConnection &&
                    avatar.isInDungeon > 0 && !string.IsNullOrEmpty(avatar.currentFloorGuid) &&
@@ -1653,6 +1649,7 @@ namespace SephiriaTogether
 
         internal static bool HostSupportsProtocol()
         {
+            if (IpTransport.IsActive) return true;
             GameObject steamManager = SingletonObject.Find("SteamManager");
             return steamManager != null && steamManager.TryGetComponent(out LobbyManager manager) &&
                    manager.HasLobby && manager.Lobby["SephiriaTogether"] == Plugin.PluginVersion;
@@ -1671,7 +1668,7 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("RuleUngrouped"), OnOff(Plugin.allowUngroupedStageTransition.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleFriendlyFire"), OnOff(Plugin.friendlyFire.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleHealing"), OnOff(Plugin.breathingHeal.Value)) + "\n" +
-                    string.Format(MenuText.Get("RuleAutoRevive"), OnOff(Plugin.autoReviveWhenClear.Value)) + "\n" +
+                    string.Format(MenuText.Get("RuleAutoRevive"), OnOff(Plugin.reviveWhenClear.Value)) + "\n" +
                     string.Format(MenuText.Get("RuleExpCatchup"), Plugin.catchUpExperienceRatio.Value.ToString("P0")) + "\n" +
                     string.Format(MenuText.Get("RuleEnemyBase"), Plugin.BaseEnemyMultiplierValue.ToString("0.##") + "x") + "\n" +
                     string.Format(MenuText.Get("RuleEnemyHp"), Plugin.BaselinePlayersValue,
@@ -1699,7 +1696,7 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("DiagnosticConnection"), connection != null ? connection.connectionId.ToString() : "-") + "\n" +
                    string.Format(MenuText.Get("DiagnosticPlayer"), identity) + "\n" +
                    string.Format(MenuText.Get("DiagnosticFloor"), FloorDisplay.Format(floor)) + "\n" +
-                   string.Format(MenuText.Get("DiagnosticPlayers"), CloneBotManager.RealPlayerCount) + "\n" +
+                    string.Format(MenuText.Get("DiagnosticPlayers"), Plugin.PlayerCount) + "\n" +
                    BuildOriginalScalingSummary();
         }
 
@@ -1715,7 +1712,7 @@ namespace SephiriaTogether
                 int ferocious = GetHardModeValue("FEROCIOUSCLAWS");
                 int bloodFestival = GetHardModeValue("BLOODFESTIVAL");
                 int bossHeal = KeywordDatabase.GetConstValue("hardModeBloodFestivalHealBossAndMiniboss");
-                int players = CloneBotManager.RealPlayerCount;
+                int players = Plugin.PlayerCount;
                 float partyScale = players == 2 ? 0.66f : players == 3 ? 0.5f : players == 4 ? 0.33f : players >= 5 ? 0.25f : 1f;
                 return string.Format(MenuText.Get("VanillaHpSummary"), normal, miniboss, boss) + "\n" +
                        string.Format(MenuText.Get("HardModeSummary"), hardPoints,
@@ -1783,7 +1780,6 @@ namespace SephiriaTogether
         {
             if (!NetworkServer.active || controller?.UnitAvatar == null || candidates == null) return;
             PlayerSpawner spawner = controller.UnitAvatar.GetComponent<PlayerSpawner>();
-            if (CloneBotManager.IsBot(spawner)) return;
             Credits credits = GetServerCredits(spawner);
             foreach (MiracleMetadata candidate in candidates)
             {
@@ -1799,7 +1795,7 @@ namespace SephiriaTogether
             foreach (BossRewardSpawner.GeneratedRewardInfo reward in spawner.generatedRewards)
             {
                 PlayerSpawner player = PlayerSpawner.MultiplayerList?.FirstOrDefault(item =>
-                    item != null && !CloneBotManager.IsBot(item) &&
+                    item != null &&
                     item.currentPlayerIdxForSave == reward.playerIndex);
                 if (player == null) continue;
                 Credits credits = GetServerCredits(player);
@@ -1827,7 +1823,7 @@ namespace SephiriaTogether
             BossRewardSessions.Remove(spawner.netId);
             HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
             bool partyWiped = PlayerSpawner.MultiplayerList != null && PlayerSpawner.MultiplayerList
-                .Where(player => player?.PlayerAvatar != null && !CloneBotManager.IsBot(player) &&
+                .Where(player => player?.PlayerAvatar != null &&
                                  player.PlayerAvatar.isInDungeon > 0)
                 .All(player => player.PlayerAvatar.IsDead);
             if ((DungeonManager.Instance != null && DungeonManager.Instance.isGiveUpRun) ||

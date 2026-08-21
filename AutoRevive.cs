@@ -14,7 +14,7 @@ namespace SephiriaTogether
 
         private static void Postfix()
         {
-            if (!NetworkServer.active || !Plugin.autoReviveWhenClear.Value ||
+            if (!NetworkServer.active || !Plugin.reviveWhenClear.Value ||
                 PlayerSpawner.MultiplayerList == null || CombatManager.Instance == null || IsGivingUp())
             {
                 clearTimer = 0f;
@@ -22,7 +22,7 @@ namespace SephiriaTogether
             }
 
             PlayerAvatar[] players = PlayerSpawner.MultiplayerList
-                .Where(spawner => spawner?.PlayerAvatar != null && !CloneBotManager.IsBot(spawner))
+                .Where(spawner => spawner?.PlayerAvatar != null)
                 .Select(spawner => spawner.PlayerAvatar)
                 .Where(player => player.isInDungeon > 0 && !string.IsNullOrEmpty(player.currentFloorGuid))
                 .ToArray();
@@ -68,11 +68,11 @@ namespace SephiriaTogether
 
         internal static bool PreventClearGameOver()
         {
-            if (!NetworkServer.active || !Plugin.autoReviveWhenClear.Value || PlayerSpawner.MultiplayerList == null)
+            if (!NetworkServer.active || !Plugin.reviveWhenClear.Value || PlayerSpawner.MultiplayerList == null)
                 return false;
             if (IsGivingUp()) return false;
             PlayerAvatar[] players = PlayerSpawner.MultiplayerList
-                .Where(spawner => spawner?.PlayerAvatar != null && !CloneBotManager.IsBot(spawner))
+                .Where(spawner => spawner?.PlayerAvatar != null)
                 .Select(spawner => spawner.PlayerAvatar)
                 .Where(player => player.isInDungeon > 0 && !string.IsNullOrEmpty(player.currentFloorGuid))
                 .ToArray();

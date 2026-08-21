@@ -101,7 +101,7 @@ namespace SephiriaTogether
         {
             int desired = EnemyCountScalingPatch.DesiredConcurrentLimit(__instance);
             if (desired <= 0) return;
-            int players = CloneBotManager.RealPlayerCount;
+            int players = Plugin.PlayerCount;
             int vanilla = EnemyCountScalingPatch.VanillaConcurrentLimit(players);
             __instance.additionalUnitCountLimit = Math.Max(__instance.additionalUnitCountLimit,
                 Math.Max(0, desired - vanilla));

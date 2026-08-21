@@ -19,7 +19,7 @@ namespace SephiriaTogether
     {
         private static void Postfix(PlayerSpawner __instance)
         {
-            if (!NetworkServer.active || CloneBotManager.IsBot(__instance) ||
+            if (!NetworkServer.active ||
                 SaveManager.CurrentRun == null || __instance.PlayerAvatar == null ||
                 __instance.PlayerAvatar.Inventory == null || SaveManager.CurrentRun.GetInt("SaveVersion", 0) == 0)
             {

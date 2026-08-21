@@ -300,8 +300,7 @@ namespace SephiriaTogether
             }
 
             PlayerSpawner routeSource = PlayerSpawner.MultiplayerList
-                .Where(peer => peer != null && peer != spawner && peer.PlayerAvatar != null &&
-                               !CloneBotManager.IsBot(peer))
+                .Where(peer => peer != null && peer != spawner && peer.PlayerAvatar != null)
                 .OrderByDescending(peer => peer.PlayerAvatar.floorTravelHistory.Count)
                 .ThenByDescending(peer => peer.isHost)
                 .FirstOrDefault();
@@ -325,7 +324,7 @@ namespace SephiriaTogether
             List<int> peerMaxDice = new List<int>();
             foreach (PlayerSpawner peer in PlayerSpawner.MultiplayerList)
             {
-                if (peer == null || peer == spawner || peer.PlayerAvatar == null || CloneBotManager.IsBot(peer) ||
+                if (peer == null || peer == spawner || peer.PlayerAvatar == null ||
                     peer.PlayerAvatar.isInDungeon <= 0 ||
                     peer.PlayerAvatar.currentFloorGuid != spawner.PlayerAvatar.currentFloorGuid)
                 {
@@ -494,7 +493,6 @@ namespace SephiriaTogether
 
             PlayerAvatar peer = PlayerSpawner.MultiplayerList
                 .Where(candidate => candidate != null && candidate != newcomer && candidate.PlayerAvatar != null &&
-                    !CloneBotManager.IsBot(candidate) &&
                     candidate.PlayerAvatar.currentFloorGuid == newcomer.PlayerAvatar.currentFloorGuid &&
                     area.Contains(candidate.PlayerAvatar.transform.position))
                 .OrderBy(candidate => candidate.PlayerAvatar.IsDead)
@@ -727,7 +725,7 @@ namespace SephiriaTogether
                                        $"{connection.connectionId}: {exception.Message}");
                     }
 
-                    if (player != null && player.spawner != null && !CloneBotManager.IsBot(player.spawner) &&
+                    if (player != null && player.spawner != null &&
                         player.isInDungeon > 0 && !string.IsNullOrEmpty(player.currentFloorGuid))
                         recipients.Add(new KeyValuePair<NetworkConnectionToClient, PlayerAvatar>(connection, player));
                 }

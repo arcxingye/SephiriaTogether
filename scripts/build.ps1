@@ -13,3 +13,6 @@ if ([string]::IsNullOrWhiteSpace($GameDir)) {
 dotnet build "$PSScriptRoot\..\SephiriaTogether.csproj" `
     -c $Configuration `
     -p:GameDir="$GameDir"
+if ($LASTEXITCODE -ne 0) {
+    throw "dotnet build failed with exit code $LASTEXITCODE."
+}

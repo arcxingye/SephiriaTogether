@@ -10,6 +10,8 @@
 4. 启动游戏。第一次启动时 BepInEx 会创建配置和缓存，可能比平时稍慢。
 5. 房主进入多人游戏后按 `F8` 打开 Sephiria Together 菜单。
 
+离线环境会自动使用 IP 传输。选择存档进入大厅后，在原版多人面板确认创建房间；客机可刷新局域网列表，或点击加入并输入 `IP:端口`。默认游戏端口为 TCP `7777`，发现端口为 UDP `7780`，请在防火墙中放行。
+
 不要把整个 ZIP 放进 `BepInEx/plugins`，也不要把文件放进 `Sephiria_Data`。
 
 ## 已安装 BepInEx
@@ -29,5 +31,7 @@ Download the ZIP whose name contains `with-BepInEx`.
 3. `winhttp.dll` and `Sephiria.exe` should be in the same directory.
 4. Start the game. The first launch can take longer while BepInEx creates its files.
 5. As the multiplayer host, press `F8` to open the Sephiria Together menu.
+
+Offline environments use the IP transport automatically. After selecting a save, confirm room creation in the original multiplayer panel. Clients can refresh the LAN list or press Join and enter `IP:port`. The default game port is TCP `7777`; discovery uses UDP `7780`. Allow both through the firewall.
 
 Do not place the whole ZIP inside `BepInEx/plugins` or `Sephiria_Data`.

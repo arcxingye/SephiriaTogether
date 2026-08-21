@@ -55,7 +55,7 @@ namespace SephiriaTogether
 
         internal static bool TrySend(PlayerAvatar target, int amount)
         {
-            if (target == null || target == LocalPlayer() || CloneBotManager.IsBot(target.spawner) ||
+            if (target == null || target == LocalPlayer() ||
                 amount <= 0 || amount > MaximumTransfer)
             {
                 Status = MenuText.Get("TransferInvalidAmount");
@@ -175,7 +175,7 @@ namespace SephiriaTogether
             bool targetOnline = targetIdentity != null && targetIdentity.isServer && targetSpawner != null &&
                                 PlayerSpawner.MultiplayerList != null &&
                                 PlayerSpawner.MultiplayerList.Contains(targetSpawner);
-            if (!targetOnline || target == null || target == sender || CloneBotManager.IsBot(targetSpawner))
+            if (!targetOnline || target == null || target == sender)
             {
                 Plugin.LogInfo($"Leaf transfer rejected: reason=invalid-target, conn={connection.connectionId}, " +
                                $"request={message.requestId}, target={message.targetNetId}, " +

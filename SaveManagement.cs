@@ -142,7 +142,6 @@ namespace SephiriaTogether
             IsBusy = true;
             Status = MenuText.Get("SaveManagerSwitching");
             CoopMenu.Close();
-            AutoPilot.SetEnabled(false);
 
             if (SaveManager.Current != null && SaveManager.CurrentRun != null)
             {

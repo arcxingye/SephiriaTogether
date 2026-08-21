@@ -9,7 +9,7 @@ namespace SephiriaTogether
     internal static class CoopMenu
     {
         private static bool open;
-        private static Rect window = new Rect(24f, 24f, 540f, 620f);
+        private static Rect window = new Rect(24f, 24f, 600f, 700f);
         private static GUIStyle title;
         private static GUIStyle section;
         private static GUIStyle windowStyle;
@@ -20,9 +20,11 @@ namespace SephiriaTogether
         private static GUIStyle button;
         private static GUIStyle primaryButton;
         private static GUIStyle dangerButton;
+        private static GUIStyle tabButton;
+        private static GUIStyle activeTabButton;
         private static GUIStyle input;
+        private static GUIStyle pathInput;
         private static GUIStyle badge;
-        private static GUIStyle tagButton;
         private static GUIStyle toggleOn;
         private static GUIStyle toggleOff;
         private static Texture2D windowTexture;
@@ -40,39 +42,19 @@ namespace SephiriaTogether
         private static bool previousInputBlock;
         private static string playerLimitText;
         private static Vector2 scroll;
-        private static Vector2 rewardDropdownScroll;
-        private static Vector2 weaponDropdownScroll;
-        private static Vector2 miracleDropdownScroll;
-        private static readonly List<PresetOption> RewardPresetOptions = new List<PresetOption>();
-        private static readonly List<PresetOption> WeaponPresetOptions = new List<PresetOption>();
-        private static readonly List<PresetOption> MiraclePresetOptions = new List<PresetOption>();
-        private static readonly List<PresetOption> FloorPresetOptions = new List<PresetOption>();
-        private static int selectedRewardPreset;
-        private static int selectedWeaponPreset;
-        private static int selectedMiraclePreset;
-        private static int selectedFloorPreset;
-        private static bool showRewardDropdown;
-        private static bool showWeaponDropdown;
-        private static bool showMiracleDropdown;
-        private static bool showFloorDropdown;
-        private static Vector2 floorDropdownScroll;
-        private static string weaponPresetStatus;
         private static bool showAdvancedScaling;
         private static int selectedTab;
         private static int hostRulesTab;
-        private static int autoPresetTab;
         private static int capturingShortcut;
         private static string pendingSaveActivation;
         private static string transferAmountText = "100";
+        private static string directPortText;
         private static uint pendingTransferTarget;
         private static int pendingTransferAmount;
-        private static int cloneSourcePage;
-        private static int cloneBotPage;
-
-        private const int CloneRowsPerPage = 4;
 
         internal static bool IsCapturingShortcut => capturingShortcut != 0;
         internal static bool IsOpen => open;
+        private static bool IsNarrow => window.width < 470f;
 
         internal static void Toggle()
         {
@@ -90,12 +72,12 @@ namespace SephiriaTogether
                     blockedController.BlockAvatarInput = true;
                 }
                 playerLimitText = PlayerLimit.CurrentLimit.ToString();
-                AutoPilot.ClearManualArrangeStatus();
-                RefreshPresetOptions();
+                ManualInventoryArrangement.ClearStatus();
                 SaveManagement.Refresh();
             }
             else
             {
+                capturingShortcut = 0;
                 Cursor.visible = previousCursorVisible;
                 Cursor.lockState = previousCursorLockMode;
                 RestoreInput();
@@ -107,6 +89,7 @@ namespace SephiriaTogether
             if (open)
             {
                 open = false;
+                capturingShortcut = 0;
                 Cursor.visible = previousCursorVisible;
                 Cursor.lockState = previousCursorLockMode;
                 RestoreInput();
@@ -124,10 +107,10 @@ namespace SephiriaTogether
                 previousInputBlock = blockedController.BlockAvatarInput;
                 blockedController.BlockAvatarInput = true;
             }
-            window.width = Mathf.Min(540f, Mathf.Max(360f, Screen.width - 24f));
-            window.x = Mathf.Clamp(window.x, 0f, Mathf.Max(0f, Screen.width - window.width));
-            window.height = Mathf.Min(680f, Mathf.Max(360f, Screen.height - 24f));
-            window.y = Mathf.Clamp(window.y, 0f, Mathf.Max(0f, Screen.height - window.height));
+            window.width = Mathf.Min(620f, Mathf.Max(1f, Screen.width - 16f));
+            window.x = Mathf.Clamp(window.x, 8f, Mathf.Max(8f, Screen.width - window.width - 8f));
+            window.height = Mathf.Min(720f, Mathf.Max(1f, Screen.height - 16f));
+            window.y = Mathf.Clamp(window.y, 8f, Mathf.Max(8f, Screen.height - window.height - 8f));
 
             EnsureStyles();
             window = GUI.Window(100100, window, DrawWindow, GUIContent.none, windowStyle);
@@ -147,251 +130,217 @@ namespace SephiriaTogether
             GUILayout.EndHorizontal();
             DrawDivider();
             DrawTabs();
-            if (selectedTab == 5)
+            if (NetworkServer.active && selectedTab == 0) DrawHostRuleTabs();
+
+            scroll = GUILayout.BeginScrollView(scroll, false, false);
+            GUILayout.Space(8f);
+            DrawSelectedPage();
+            GUILayout.EndScrollView();
+            DrawFooter();
+            GUILayout.EndVertical();
+            GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 66f));
+        }
+
+        private static void DrawSelectedPage()
+        {
+            if (selectedTab == 4)
             {
                 DrawSaveManagerPage();
-                GUILayout.EndVertical();
-                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
                 return;
             }
-            if (selectedTab == 6)
+            if (selectedTab == 5)
             {
                 DrawTransferPage();
-                GUILayout.EndVertical();
-                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
-                return;
-            }
-            if (selectedTab == 1)
-            {
-                DrawAutoPilotPage();
-                GUILayout.EndVertical();
-                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
                 return;
             }
             if (!NetworkServer.active)
             {
-                DrawClientPage();
-                GUILayout.EndVertical();
-                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
+                if (selectedTab == 1) DrawClientCompensation();
+                else DrawClientPage();
                 return;
             }
-            if (selectedTab != 0)
-            {
-                DrawHostPage();
-                GUILayout.EndVertical();
-                GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 54f));
-                return;
-            }
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
-            GUILayout.Space(8f);
-            GUILayout.Label(MenuText.Get("NextSpawn"), muted);
-            DrawLocalShortcutSettings();
-            DrawHostRuleTabs();
+            if (selectedTab == 0) DrawHostRulesPage();
+            else DrawHostPage();
+        }
 
+        private static void DrawHostRulesPage()
+        {
+            if (hostRulesTab != 2) GUILayout.Label(MenuText.Get("NextSpawn"), muted);
             if (hostRulesTab == 0)
             {
-            BeginSection(MenuText.Get("Multiplayer"));
-            if (JoinProgressBypass.CanCreateLobbyForCurrentRun())
-            {
-                GUILayout.Label(MenuText.Get("ResumeLobbyHelp"), muted);
-                if (GUILayout.Button(MenuText.Get("ResumeLobby"), primaryButton, GUILayout.Height(38f)))
-                    JoinProgressBypass.OpenLobbyCreationForCurrentRun();
-                GUILayout.Space(8f);
-            }
-            GUILayout.Label(MenuText.Get("PlayerLimit"), body);
-            GUILayout.BeginHorizontal();
-            playerLimitText = GUILayout.TextField(playerLimitText ?? PlayerLimit.CurrentLimit.ToString(), 3, input, GUILayout.Height(34f));
-            if (GUILayout.Button(MenuText.Get("Apply"), primaryButton, GUILayout.Width(170f), GUILayout.Height(34f)) && int.TryParse(playerLimitText, out int requestedLimit))
-            {
-                PlayerLimit.SetLimit(requestedLimit);
-                playerLimitText = PlayerLimit.CurrentLimit.ToString();
-            }
-            GUILayout.EndHorizontal();
-            DrawToggle(MenuText.Get("LowerProgress"), Plugin.allowLowerProgressPlayers);
-            DrawToggle(MenuText.Get("MidRun"), Plugin.allowMidRunJoin);
-            DrawToggle(MenuText.Get("UngroupedTransition"), Plugin.allowUngroupedStageTransition);
-            GUILayout.Label(MenuText.Get("UngroupedTransitionHelp"), muted);
-            DrawToggle(MenuText.Get("BreathingHeal"), Plugin.breathingHeal);
-            GUILayout.Label(MenuText.Get("BreathingHealHelp"), muted);
-            DrawToggle(MenuText.Get("AutoReviveWhenClear"), Plugin.autoReviveWhenClear);
-            GUILayout.Label(MenuText.Get("AutoReviveWhenClearHelp"), muted);
-            DrawToggle(MenuText.Get("FriendlyFire"), Plugin.friendlyFire);
-            GUILayout.Label(MenuText.Get("FriendlyFireHelp"), muted);
-            GUILayout.Space(8f);
-            DrawToggle(MenuText.Get("Catchup"), Plugin.catchUpExperienceRatio.Value > 0.5f,
-                () => Plugin.catchUpExperienceRatio.Value = Plugin.catchUpExperienceRatio.Value > 0.5f ? 0f : 1f);
-            EndSection();
+                BeginSection(MenuText.Get("LocalShortcuts"));
+                DrawLocalShortcutSettings();
+                EndSection();
+                DrawManualInventoryArrangementControls();
 
-            GUILayout.Space(8f);
-            BeginSection(MenuText.Get("StartProgress"));
-            GUILayout.Label(MenuText.Get("StartProgressHelp"), muted);
-            List<PlayerSpawner> progressPlayers = StartProgressSelection.GetCandidates();
-            if (progressPlayers.Count == 0)
-            {
-                GUILayout.Label(MenuText.Get("StartProgressNoPlayers"), muted);
-            }
-            else
-            {
-                foreach (PlayerSpawner progressPlayer in progressPlayers)
+                BeginSection(MenuText.Get("Multiplayer"));
+                if (JoinProgressBypass.CanCreateLobbyForCurrentRun())
                 {
-                    GUI.enabled = StartProgressSelection.CanSelectPlayer(progressPlayer);
-                    if (GUILayout.Button(StartProgressSelection.Describe(progressPlayer),
-                            StartProgressSelection.IsSelected(progressPlayer) ? primaryButton : button,
-                            GUILayout.Height(32f)))
-                        StartProgressSelection.Select(progressPlayer);
-                    GUI.enabled = true;
+                    GUILayout.Label(MenuText.Get("ResumeLobbyHelp"), muted);
+                    if (GUILayout.Button(MenuText.Get("ResumeLobby"), primaryButton, GUILayout.Height(38f)))
+                        JoinProgressBypass.OpenLobbyCreationForCurrentRun();
+                    GUILayout.Space(8f);
                 }
-            }
-            GUI.enabled = StartProgressSelection.CanApplySelected;
-            if (GUILayout.Button(MenuText.Get("StartProgressApply"), primaryButton, GUILayout.Height(36f)))
-            {
-                if (StartProgressSelection.ApplySelected()) Close();
-            }
-            GUI.enabled = true;
-            if (!string.IsNullOrEmpty(StartProgressSelection.Status))
-                GUILayout.Label(StartProgressSelection.Status, muted);
-            EndSection();
+                GUILayout.Label(MenuText.Get("PlayerLimit"), body);
+                bool applyLimit;
+                if (IsNarrow)
+                {
+                    playerLimitText = GUILayout.TextField(playerLimitText ?? PlayerLimit.CurrentLimit.ToString(), 3, input,
+                        GUILayout.Height(34f));
+                    applyLimit = GUILayout.Button(MenuText.Get("Apply"), primaryButton, GUILayout.Height(34f));
+                }
+                else
+                {
+                    GUILayout.BeginHorizontal();
+                    playerLimitText = GUILayout.TextField(playerLimitText ?? PlayerLimit.CurrentLimit.ToString(), 3, input,
+                        GUILayout.Height(34f));
+                    applyLimit = GUILayout.Button(MenuText.Get("Apply"), primaryButton, GUILayout.Width(150f), GUILayout.Height(34f));
+                    GUILayout.EndHorizontal();
+                }
+                if (applyLimit && int.TryParse(playerLimitText, out int requestedLimit))
+                {
+                    PlayerLimit.SetLimit(requestedLimit);
+                    playerLimitText = PlayerLimit.CurrentLimit.ToString();
+                }
+                DrawToggle(MenuText.Get("LowerProgress"), Plugin.allowLowerProgressPlayers);
+                DrawToggle(MenuText.Get("MidRun"), Plugin.allowMidRunJoin);
+                DrawToggle(MenuText.Get("UngroupedTransition"), Plugin.allowUngroupedStageTransition);
+                GUILayout.Label(MenuText.Get("UngroupedTransitionHelp"), muted);
+                DrawToggle(MenuText.Get("BreathingHeal"), Plugin.breathingHeal);
+                GUILayout.Label(MenuText.Get("BreathingHealHelp"), muted);
+                DrawToggle(MenuText.Get("AutoReviveWhenClear"), Plugin.reviveWhenClear);
+                GUILayout.Label(MenuText.Get("AutoReviveWhenClearHelp"), muted);
+                DrawToggle(MenuText.Get("FriendlyFire"), Plugin.friendlyFire);
+                GUILayout.Label(MenuText.Get("FriendlyFireHelp"), muted);
+                GUILayout.Space(8f);
+                DrawToggle(MenuText.Get("Catchup"), Plugin.catchUpExperienceRatio.Value > 0.5f,
+                    () => Plugin.catchUpExperienceRatio.Value = Plugin.catchUpExperienceRatio.Value > 0.5f ? 0f : 1f);
+                EndSection();
 
-            GUILayout.Space(8f);
-            BeginSection(MenuText.Get("CloneBots"));
-            GUILayout.Label(MenuText.Get("CloneBotsHelp"), muted);
-            List<PlayerSpawner> cloneSources = (PlayerSpawner.MultiplayerList ?? new List<PlayerSpawner>())
-                .Where(source => source?.PlayerAvatar != null && !CloneBotManager.IsBot(source))
-                .OrderBy(source => source.PlayerAvatar.Name)
-                .ToList();
-            GUILayout.Label(MenuText.Get("CloneSources"), section);
-            cloneSourcePage = ClampPage(cloneSourcePage, cloneSources.Count, CloneRowsPerPage);
-            foreach (PlayerSpawner source in cloneSources.Skip(cloneSourcePage * CloneRowsPerPage)
-                         .Take(CloneRowsPerPage))
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(source.PlayerAvatar.Name, body);
-                GUILayout.FlexibleSpace();
-                GUI.enabled = CloneBotManager.CanClonePlayer(source);
-                if (GUILayout.Button(MenuText.Get("CloneLocalPlayer"), primaryButton,
-                        GUILayout.Width(110f), GUILayout.Height(30f)))
-                    CloneBotManager.CreateCloneOf(source);
+                BeginSection(MenuText.Get("StartProgress"));
+                GUILayout.Label(MenuText.Get("StartProgressHelp"), muted);
+                List<PlayerSpawner> progressPlayers = StartProgressSelection.GetCandidates();
+                if (progressPlayers.Count == 0)
+                {
+                    GUILayout.Label(MenuText.Get("StartProgressNoPlayers"), muted);
+                }
+                else
+                {
+                    foreach (PlayerSpawner progressPlayer in progressPlayers)
+                    {
+                        GUI.enabled = StartProgressSelection.CanSelectPlayer(progressPlayer);
+                        if (GUILayout.Button(StartProgressSelection.Describe(progressPlayer),
+                                StartProgressSelection.IsSelected(progressPlayer) ? primaryButton : button,
+                                GUILayout.Height(IsNarrow ? 42f : 32f)))
+                            StartProgressSelection.Select(progressPlayer);
+                        GUI.enabled = true;
+                    }
+                }
+                GUI.enabled = StartProgressSelection.CanApplySelected;
+                if (GUILayout.Button(MenuText.Get("StartProgressApply"), primaryButton, GUILayout.Height(36f)))
+                {
+                    if (StartProgressSelection.ApplySelected()) Close();
+                }
                 GUI.enabled = true;
-                GUILayout.EndHorizontal();
-            }
-            DrawPager(ref cloneSourcePage, cloneSources.Count, CloneRowsPerPage);
-
-            List<PlayerSpawner> activeBots = CloneBotManager.ActiveBots
-                .Where(bot => bot?.PlayerAvatar != null)
-                .ToList();
-            GUILayout.Space(6f);
-            GUILayout.Label(MenuText.Get("ActiveCloneBots"), section);
-            if (activeBots.Count == 0) GUILayout.Label(MenuText.Get("NoCloneBots"), muted);
-            cloneBotPage = ClampPage(cloneBotPage, activeBots.Count, CloneRowsPerPage);
-            foreach (PlayerSpawner bot in activeBots.Skip(cloneBotPage * CloneRowsPerPage)
-                         .Take(CloneRowsPerPage))
-            {
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(bot.PlayerAvatar.Name, body);
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button(MenuText.Get("RemoveCloneBot"), button,
-                        GUILayout.Width(96f), GUILayout.Height(28f)))
-                    CloneBotManager.RemoveBot(bot);
-                GUILayout.EndHorizontal();
-            }
-            DrawPager(ref cloneBotPage, activeBots.Count, CloneRowsPerPage);
-            if (activeBots.Count > 0 &&
-                GUILayout.Button(MenuText.Get("RemoveAllCloneBots"), button, GUILayout.Height(32f)))
-                CloneBotManager.RemoveAllBots();
-            EndSection();
+                if (!string.IsNullOrEmpty(StartProgressSelection.Status))
+                    GUILayout.Label(StartProgressSelection.Status, muted);
+                EndSection();
+                return;
             }
 
             if (hostRulesTab == 1)
             {
-            BeginSection(MenuText.Get("EnemyScaling"));
-            GUILayout.Label(MenuText.Get("ScalingHelp"), muted);
-            GUILayout.Space(6f);
-            GUILayout.Label(MenuText.Get("VanillaScaling"), section);
-            GUILayout.Label(CatchUpRewards.BuildOriginalScalingSummary(), body);
-            GUILayout.Space(6f);
-            DrawToggle(MenuText.Get("BossLifesteal"), Plugin.bossLifesteal);
-            GUILayout.Label(MenuText.Get("BossLifestealHelp"), muted);
-            GUILayout.Space(8f);
-            int currentPreset = GetPreset();
-            DrawValue(MenuText.Get("CurrentPreset"), GetPresetName(currentPreset), 150f);
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(MenuText.Get("PresetCasual"), currentPreset == 1 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(1);
-            if (GUILayout.Button(MenuText.Get("PresetOriginal"), currentPreset == 0 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(0);
-            GUILayout.EndHorizontal();
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(MenuText.Get("PresetStandard"), currentPreset == 2 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(2);
-            if (GUILayout.Button(MenuText.Get("PresetHigh"), currentPreset == 3 ? primaryButton : button, GUILayout.Height(34f))) ApplyScalingPreset(3);
-            GUILayout.EndHorizontal();
-            int activePlayers = CloneBotManager.RealPlayerCount;
-            int extraPlayers = Mathf.Max(0, activePlayers - Plugin.BaselinePlayersValue);
-            float healthMultiplier = Plugin.BaseEnemyMultiplierValue *
-                                     (1f + extraPlayers * Plugin.HealthPerExtraPlayerValue);
-            if (Plugin.MaximumMultiplierValue > 0f) healthMultiplier = Mathf.Min(healthMultiplier, Plugin.MaximumMultiplierValue);
-            float countMultiplier = Plugin.BaseEnemyMultiplierValue * (Plugin.scaleEnemyCount.Value
-                ? 1f + extraPlayers * Plugin.EnemyCountPerExtraPlayerValue
-                : 1f);
-            countMultiplier = Mathf.Min(Plugin.MaximumEnemyCountMultiplierValue, countMultiplier);
-            GUILayout.BeginVertical(playerCard);
-            GUILayout.Label(string.Format(MenuText.Get("ScalingPreviewPlayers"), activePlayers), section);
-            DrawValue(MenuText.Get("PreviewHealth"), healthMultiplier.ToString("0.00") + "x");
-            DrawValue(MenuText.Get("PreviewCount"), countMultiplier.ToString("0.00") + "x");
-            GUILayout.Label(MenuText.Get("ScalingTiming"), muted);
-            GUILayout.EndVertical();
-            GUILayout.Space(6f);
-            if (GUILayout.Button(showAdvancedScaling ? MenuText.Get("HideAdvanced") : MenuText.Get("ShowAdvanced"), button, GUILayout.Height(32f)))
-            {
-                showAdvancedScaling = !showAdvancedScaling;
-            }
-            if (showAdvancedScaling)
-            {
+                BeginSection(MenuText.Get("EnemyScaling"));
+                GUILayout.Label(MenuText.Get("ScalingHelp"), muted);
+                GUILayout.Space(6f);
+                GUILayout.Label(MenuText.Get("VanillaScaling"), section);
+                GUILayout.Label(CatchUpRewards.BuildOriginalScalingSummary(), body);
+                GUILayout.Space(6f);
+                DrawToggle(MenuText.Get("BossLifesteal"), Plugin.bossLifesteal);
+                GUILayout.Label(MenuText.Get("BossLifestealHelp"), muted);
                 GUILayout.Space(8f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(MenuText.Get("Baseline"), body);
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("-", button, GUILayout.Width(36f), GUILayout.Height(30f))) Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue - 1);
-            GUILayout.Label(Plugin.BaselinePlayersValue.ToString(), badge, GUILayout.Width(54f), GUILayout.Height(30f));
-            if (GUILayout.Button("+", button, GUILayout.Width(36f), GUILayout.Height(30f))) Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue + 1);
-            GUILayout.EndHorizontal();
-            DrawValue(MenuText.Get("ExtraHp"), (Plugin.HealthPerExtraPlayerValue * 100f).ToString("0") + "%");
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("-5%", button, GUILayout.Height(32f))) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue - 0.05f);
-            if (GUILayout.Button("+5%", button, GUILayout.Height(32f))) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue + 0.05f);
-            GUILayout.EndHorizontal();
-            DrawValue(MenuText.Get("HpCap"), Plugin.MaximumMultiplierValue.ToString("0.##") + "x");
-            if (GUILayout.Button(MenuText.Get("CycleHpCap"), button, GUILayout.Height(32f)))
-            {
-                float value = Plugin.MaximumMultiplierValue;
-                Plugin.SetMaximumMultiplier(value < 4.1f ? 8f : value < 8.1f ? 12f : value < 12.1f ? 0f : 4f);
-            }
-            DrawToggle(MenuText.Get("EnemyCount"), Plugin.scaleEnemyCount);
-            DrawValue(MenuText.Get("CountPerPlayer"), (Plugin.EnemyCountPerExtraPlayerValue * 100f).ToString("0") + "%");
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("-2%", button, GUILayout.Height(32f))) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue - 0.02f);
-            if (GUILayout.Button("+2%", button, GUILayout.Height(32f))) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue + 0.02f);
-            GUILayout.EndHorizontal();
-            DrawValue(MenuText.Get("CountCap"), Plugin.MaximumEnemyCountMultiplierValue.ToString("0.##") + "x");
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button("-0.5x", button, GUILayout.Height(32f))) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue - 0.5f);
-            if (GUILayout.Button("+0.5x", button, GUILayout.Height(32f))) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue + 0.5f);
-            GUILayout.EndHorizontal();
-            }
-            EndSection();
+                int currentPreset = GetPreset();
+                DrawValue(MenuText.Get("CurrentPreset"), GetPresetName(currentPreset), 150f);
+                string[] presetLabels =
+                {
+                    MenuText.Get("PresetCasual"), MenuText.Get("PresetOriginal"),
+                    MenuText.Get("PresetStandard"), MenuText.Get("PresetHigh")
+                };
+                int[] presetValues = { 1, 0, 2, 3 };
+                int activePreset = Array.IndexOf(presetValues, currentPreset);
+                int clickedPreset = DrawButtonGrid(presetLabels, activePreset, 2, 36f);
+                if (clickedPreset >= 0) ApplyScalingPreset(presetValues[clickedPreset]);
+
+                int activePlayers = Plugin.PlayerCount;
+                int extraPlayers = Mathf.Max(0, activePlayers - Plugin.BaselinePlayersValue);
+                float healthMultiplier = Plugin.BaseEnemyMultiplierValue *
+                                         (1f + extraPlayers * Plugin.HealthPerExtraPlayerValue);
+                if (Plugin.MaximumMultiplierValue > 0f)
+                    healthMultiplier = Mathf.Min(healthMultiplier, Plugin.MaximumMultiplierValue);
+                float countMultiplier = Plugin.BaseEnemyMultiplierValue * (Plugin.scaleEnemyCount.Value
+                    ? 1f + extraPlayers * Plugin.EnemyCountPerExtraPlayerValue
+                    : 1f);
+                countMultiplier = Mathf.Min(Plugin.MaximumEnemyCountMultiplierValue, countMultiplier);
+                GUILayout.BeginVertical(playerCard);
+                GUILayout.Label(string.Format(MenuText.Get("ScalingPreviewPlayers"), activePlayers), section);
+                DrawValue(MenuText.Get("PreviewHealth"), healthMultiplier.ToString("0.00") + "x");
+                DrawValue(MenuText.Get("PreviewCount"), countMultiplier.ToString("0.00") + "x");
+                GUILayout.Label(MenuText.Get("ScalingTiming"), muted);
+                GUILayout.EndVertical();
+                GUILayout.Space(6f);
+                if (GUILayout.Button(showAdvancedScaling ? MenuText.Get("HideAdvanced") : MenuText.Get("ShowAdvanced"),
+                        button, GUILayout.Height(32f)))
+                    showAdvancedScaling = !showAdvancedScaling;
+                if (showAdvancedScaling)
+                {
+                    GUILayout.Space(8f);
+                    DrawStepper(MenuText.Get("Baseline"), Plugin.BaselinePlayersValue.ToString(),
+                        () => Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue - 1),
+                        () => Plugin.SetBaselinePlayers(Plugin.BaselinePlayersValue + 1));
+                    DrawValue(MenuText.Get("ExtraHp"), (Plugin.HealthPerExtraPlayerValue * 100f).ToString("0") + "%");
+                    int hpStep = DrawButtonGrid(new[] { "-5%", "+5%" }, -1, 2, 32f);
+                    if (hpStep == 0) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue - 0.05f);
+                    else if (hpStep == 1) Plugin.SetHealthPerExtraPlayer(Plugin.HealthPerExtraPlayerValue + 0.05f);
+                    DrawValue(MenuText.Get("HpCap"), Plugin.MaximumMultiplierValue.ToString("0.##") + "x");
+                    if (GUILayout.Button(MenuText.Get("CycleHpCap"), button, GUILayout.Height(32f)))
+                    {
+                        float value = Plugin.MaximumMultiplierValue;
+                        Plugin.SetMaximumMultiplier(value < 4.1f ? 8f : value < 8.1f ? 12f : value < 12.1f ? 0f : 4f);
+                    }
+                    DrawToggle(MenuText.Get("EnemyCount"), Plugin.scaleEnemyCount);
+                    DrawValue(MenuText.Get("CountPerPlayer"),
+                        (Plugin.EnemyCountPerExtraPlayerValue * 100f).ToString("0") + "%");
+                    int countStep = DrawButtonGrid(new[] { "-2%", "+2%" }, -1, 2, 32f);
+                    if (countStep == 0) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue - 0.02f);
+                    else if (countStep == 1) Plugin.SetEnemyCountPerExtraPlayer(Plugin.EnemyCountPerExtraPlayerValue + 0.02f);
+                    DrawValue(MenuText.Get("CountCap"), Plugin.MaximumEnemyCountMultiplierValue.ToString("0.##") + "x");
+                    int capStep = DrawButtonGrid(new[] { "-0.5x", "+0.5x" }, -1, 2, 32f);
+                    if (capStep == 0) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue - 0.5f);
+                    else if (capStep == 1) Plugin.SetMaximumEnemyCountMultiplier(Plugin.MaximumEnemyCountMultiplierValue + 0.5f);
+                }
+                EndSection();
+                return;
             }
 
-            if (hostRulesTab == 2)
-            {
-                DrawPlayers();
-            }
-            GUILayout.Space(8f);
-            GUILayout.EndScrollView();
+            DrawPlayers();
+        }
+
+        private static void DrawFooter()
+        {
             GUILayout.Space(4f);
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(MenuText.Get("Save"), primaryButton, GUILayout.Height(38f))) Plugin.SaveSettings();
-            if (GUILayout.Button(MenuText.Get("Close"), button, GUILayout.Height(38f))) Toggle();
-            GUILayout.EndHorizontal();
-            GUILayout.Space(8f);
-            GUILayout.EndVertical();
-            GUI.DragWindow(new Rect(0f, 0f, window.width - 52f, 70f));
+            DrawDivider();
+            GUILayout.Space(6f);
+            if (NetworkServer.active && selectedTab == 0)
+            {
+                int action = DrawButtonGrid(new[] { MenuText.Get("Save"), MenuText.Get("Close") }, 0, 2, 38f);
+                if (action == 0) Plugin.SaveSettings();
+                else if (action == 1) Close();
+            }
+            else if (DrawButtonGrid(new[] { MenuText.Get("Close") }, -1, 1, 38f) == 0)
+            {
+                Close();
+            }
+            GUILayout.Space(2f);
         }
 
         private static void DrawClientCompensation()
@@ -407,8 +356,6 @@ namespace SephiriaTogether
             }
 
             CatchUpRewards.SendHello();
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
-            GUILayout.Space(8f);
             BeginSection(MenuText.Get("ClientCompensation"));
             GUILayout.Label(MenuText.Get("ClientAutoGranted"), muted);
             if (CatchUpRewards.ClientClaimPending)
@@ -460,26 +407,21 @@ namespace SephiriaTogether
             GUILayout.Space(8f);
             GUILayout.Label(MenuText.Get("ClientMissingRewards"), muted);
             EndSection();
-            if (GUILayout.Button(MenuText.Get("Close"), button, GUILayout.Height(38f))) Toggle();
-            GUILayout.EndScrollView();
         }
 
         private static void DrawTabs()
         {
-            string[] labels = { "TabRules", "TabAutoPilot", "TabCompensation", "TabDiagnostics", "TabHistory", "TabSaves", "TabTransfer" };
-            for (int i = 0; i < labels.Length; i++)
+            string[] labels = { "TabRules", "TabCompensation", "TabDiagnostics", "TabHistory", "TabSaves", "TabTransfer" };
+            string[] localized = labels.Select(MenuText.Get).ToArray();
+            int columns = IsNarrow ? 2 : 3;
+            int selected = DrawButtonGrid(localized, selectedTab, columns, IsNarrow ? 40f : 34f, useTabStyles: true);
+            if (selected >= 0 && selected != selectedTab)
             {
-                if (i % 3 == 0) GUILayout.BeginHorizontal();
-                if (GUILayout.Button(MenuText.Get(labels[i]), selectedTab == i ? primaryButton : button, GUILayout.Height(32f)))
-                {
-                    selectedTab = i;
-                    scroll = Vector2.zero;
-                    pendingTransferTarget = 0;
-                    pendingTransferAmount = 0;
-                }
-                if (i % 3 == 2) GUILayout.EndHorizontal();
+                selectedTab = selected;
+                scroll = Vector2.zero;
+                pendingTransferTarget = 0;
+                pendingTransferAmount = 0;
             }
-            if (labels.Length % 3 != 0) GUILayout.EndHorizontal();
             DrawDivider();
         }
 
@@ -488,20 +430,26 @@ namespace SephiriaTogether
             CatchUpRewards.SendHello();
             MoneyTransfer.Tick();
             PlayerAvatar local = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
-            GUILayout.Space(4f);
             BeginSection(MenuText.Get("LeafTransfer"));
             GUILayout.Label(MenuText.Get("LeafTransferHelp"), muted);
             DrawValue(MenuText.Get("TransferBalance"), (local?.Money ?? 0).ToString(), 130f);
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(MenuText.Get("TransferAmount"), body, GUILayout.Width(150f));
-            transferAmountText = GUILayout.TextField(transferAmountText ?? "", input, GUILayout.Height(30f));
-            GUILayout.EndHorizontal();
+            if (IsNarrow)
+            {
+                GUILayout.Label(MenuText.Get("TransferAmount"), body);
+                transferAmountText = GUILayout.TextField(transferAmountText ?? "", input, GUILayout.Height(30f));
+            }
+            else
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(MenuText.Get("TransferAmount"), body, GUILayout.Width(150f));
+                transferAmountText = GUILayout.TextField(transferAmountText ?? "", input, GUILayout.Height(30f));
+                GUILayout.EndHorizontal();
+            }
             if (!string.IsNullOrEmpty(MoneyTransfer.Status)) GUILayout.Label(MoneyTransfer.Status, muted);
             EndSection();
 
             List<PlayerAvatar> recipients = PlayerSpawner.MultiplayerList?
-                .Where(spawner => spawner?.PlayerAvatar != null && !CloneBotManager.IsBot(spawner) &&
+                .Where(spawner => spawner?.PlayerAvatar != null &&
                                   spawner.PlayerAvatar != local)
                 .Select(spawner => spawner.PlayerAvatar)
                 .ToList() ?? new List<PlayerAvatar>();
@@ -511,12 +459,7 @@ namespace SephiriaTogether
             foreach (PlayerAvatar recipient in recipients)
             {
                 GUILayout.BeginVertical(playerCard);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(recipient.Name, section);
-                GUILayout.FlexibleSpace();
-                GUILayout.Label(MenuText.Get(recipient.IsDead ? "Dead" : "Connected"), badge,
-                    GUILayout.Width(90f), GUILayout.Height(26f));
-                GUILayout.EndHorizontal();
+                DrawCardHeader(recipient.Name, MenuText.Get(recipient.IsDead ? "Dead" : "Connected"));
                 GUILayout.Label(MenuText.Get("TransferRecipientBalance") + " " + recipient.Money, muted);
 
                 bool confirming = pendingTransferTarget == recipient.netId;
@@ -535,108 +478,120 @@ namespace SephiriaTogether
                 {
                     GUILayout.Label(string.Format(MenuText.Get("TransferConfirmHelp"),
                         recipient.Name, pendingTransferAmount), muted);
-                    GUILayout.BeginHorizontal();
                     GUI.enabled = !MoneyTransfer.IsPending;
-                    if (GUILayout.Button(MenuText.Get("TransferConfirm"), dangerButton, GUILayout.Height(28f)))
+                    int action = DrawButtonGrid(new[]
+                    {
+                        MenuText.Get("TransferConfirm"), MenuText.Get("TransferCancel")
+                    }, -1, IsNarrow ? 1 : 2, 30f, firstDanger: true);
+                    if (action == 0)
                     {
                         MoneyTransfer.TrySend(recipient, pendingTransferAmount);
                         pendingTransferTarget = 0;
                         pendingTransferAmount = 0;
                     }
                     GUI.enabled = true;
-                    if (GUILayout.Button(MenuText.Get("TransferCancel"), button, GUILayout.Height(28f)))
+                    if (action == 1)
                     {
                         pendingTransferTarget = 0;
                         pendingTransferAmount = 0;
                     }
-                    GUILayout.EndHorizontal();
                 }
                 GUILayout.EndVertical();
                 GUILayout.Space(1f);
             }
-            GUILayout.EndScrollView();
         }
 
         private static void DrawSaveManagerPage()
         {
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
-            GUILayout.Space(4f);
             BeginSection(MenuText.Get("SaveManager"));
             GUILayout.Label(MenuText.Get("SaveManagerHelp"), muted);
             GUILayout.Label(MenuText.Get("SaveManagerDirectory"), body);
-            GUILayout.TextField(SaveManagement.SaveDirectory, input, GUILayout.Height(28f));
+            GUILayout.TextField(SaveManagement.SaveDirectory, pathInput, GUILayout.Height(IsNarrow ? 42f : 28f));
             DrawValue(MenuText.Get("SaveManagerCurrent"), SaveManagement.SelectedSlot, 110f);
             if (!string.IsNullOrEmpty(SaveManagement.Status)) GUILayout.Label(SaveManagement.Status, muted);
-            GUILayout.BeginHorizontal();
             GUI.enabled = !SaveManagement.IsBusy;
-            if (GUILayout.Button(MenuText.Get("SaveManagerBackupNow"), primaryButton, GUILayout.Height(30f)))
+            int saveAction = DrawButtonGrid(new[]
+            {
+                MenuText.Get("SaveManagerBackupNow"), MenuText.Get("SaveManagerRefresh")
+            }, -1, IsNarrow ? 1 : 2, 32f);
+            if (saveAction == 0)
                 SaveManagement.BackupCurrent();
-            if (GUILayout.Button(MenuText.Get("SaveManagerRefresh"), button, GUILayout.Height(30f)))
+            if (saveAction == 1)
             {
                 pendingSaveActivation = null;
                 SaveManagement.Refresh();
             }
             GUI.enabled = true;
-            GUILayout.EndHorizontal();
-            GUILayout.Space(4f);
+            EndSection();
 
             foreach (ManagedSaveEntry entry in SaveManagement.Saves)
             {
                 GUILayout.BeginVertical(playerCard);
                 string kind = entry.IsBackup
                     ? entry.IsManagedBackup ? MenuText.Get("SaveManagerModBackup") : MenuText.Get("SaveManagerGameBackup")
-                    : MenuText.Get("SaveManagerActiveSave");
+                    : string.Equals(entry.Slot, SaveManagement.SelectedSlot, StringComparison.OrdinalIgnoreCase)
+                        ? MenuText.Get("SaveManagerActiveSave")
+                        : MenuText.Get("SaveManagerOtherSave");
                 bool confirming = pendingSaveActivation == entry.Id;
-                GUILayout.BeginHorizontal();
-                GUILayout.BeginVertical();
-                GUILayout.Label($"{entry.Slot} · {kind}", section);
-                GUILayout.Label(entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss") + " · " +
-                                (entry.CanResumeDungeon ? MenuText.Get("SaveManagerWithRun") : MenuText.Get("SaveManagerMainOnly")),
-                    muted);
-                GUILayout.EndVertical();
-                GUI.enabled = !SaveManagement.IsBusy;
-                if (!confirming)
+                if (!IsNarrow && !confirming)
                 {
+                    GUILayout.BeginHorizontal();
+                    GUILayout.BeginVertical();
+                    GUILayout.Label($"{entry.Slot} · {kind}", section);
+                    GUILayout.Label(entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss") + " · " +
+                                    (entry.CanResumeDungeon ? MenuText.Get("SaveManagerWithRun") : MenuText.Get("SaveManagerMainOnly")),
+                        muted);
+                    GUILayout.EndVertical();
+                    GUILayout.FlexibleSpace();
+                    GUI.enabled = !SaveManagement.IsBusy;
                     if (GUILayout.Button(MenuText.Get("SaveManagerUse"), button,
-                            GUILayout.Width(104f), GUILayout.Height(30f)))
+                            GUILayout.Width(112f), GUILayout.Height(32f)))
                         pendingSaveActivation = entry.Id;
+                    GUI.enabled = true;
+                    GUILayout.EndHorizontal();
                 }
-                GUILayout.EndHorizontal();
+                else
+                {
+                    GUILayout.Label($"{entry.Slot} · {kind}", section);
+                    GUILayout.Label(entry.Timestamp.ToString("yyyy-MM-dd HH:mm:ss") + " · " +
+                                    (entry.CanResumeDungeon ? MenuText.Get("SaveManagerWithRun") : MenuText.Get("SaveManagerMainOnly")),
+                        muted);
+                    GUI.enabled = !SaveManagement.IsBusy;
+                    if (!confirming && GUILayout.Button(MenuText.Get("SaveManagerUse"), button,
+                            GUILayout.Height(30f)))
+                        pendingSaveActivation = entry.Id;
+                    GUI.enabled = true;
+                }
                 if (confirming)
                 {
                     GUILayout.Label(MenuText.Get("SaveManagerConfirmHelp"), muted);
-                    GUILayout.BeginHorizontal();
-                    if (GUILayout.Button(MenuText.Get("SaveManagerConfirmUse"), dangerButton, GUILayout.Height(28f)))
+                    int confirmAction = DrawButtonGrid(new[]
+                    {
+                        MenuText.Get("SaveManagerConfirmUse"), MenuText.Get("SaveManagerCancel")
+                    }, -1, IsNarrow ? 1 : 2, 30f, firstDanger: true);
+                    if (confirmAction == 0)
                     {
                         pendingSaveActivation = null;
                         SaveManagement.Activate(entry);
                     }
-                    if (GUILayout.Button(MenuText.Get("SaveManagerCancel"), button, GUILayout.Height(28f)))
+                    if (confirmAction == 1)
                         pendingSaveActivation = null;
-                    GUILayout.EndHorizontal();
                 }
-                GUI.enabled = true;
                 GUILayout.EndVertical();
                 GUILayout.Space(1f);
             }
-            EndSection();
-            GUILayout.EndScrollView();
         }
 
         private static void DrawHostRuleTabs()
         {
             string[] labels = { "HostMultiplayerTab", "HostScalingTab", "HostPlayersTab" };
-            GUILayout.BeginHorizontal();
-            for (int i = 0; i < labels.Length; i++)
+            int selected = DrawButtonGrid(labels.Select(MenuText.Get).ToArray(), hostRulesTab, 3,
+                IsNarrow ? 42f : 32f, useTabStyles: true);
+            if (selected >= 0 && selected != hostRulesTab)
             {
-                if (GUILayout.Button(MenuText.Get(labels[i]), hostRulesTab == i ? primaryButton : button,
-                    GUILayout.Height(30f)))
-                {
-                    hostRulesTab = i;
-                    scroll = Vector2.zero;
-                }
+                hostRulesTab = selected;
+                scroll = Vector2.zero;
             }
-            GUILayout.EndHorizontal();
             DrawDivider();
         }
 
@@ -647,31 +602,45 @@ namespace SephiriaTogether
             {
                 return;
             }
-
-            KeyCode[] modifiers = new List<KeyCode>
+            if (Event.current.keyCode == KeyCode.Escape)
             {
-                Event.current.control ? KeyCode.LeftControl : KeyCode.None,
-                Event.current.shift ? KeyCode.LeftShift : KeyCode.None,
-                Event.current.alt ? KeyCode.LeftAlt : KeyCode.None,
-                Event.current.command ? KeyCode.LeftCommand : KeyCode.None
-            }.Where(key => key != KeyCode.None).ToArray();
-            if (modifiers.Length == 0 &&
-                (Event.current.keyCode == KeyCode.LeftControl || Event.current.keyCode == KeyCode.RightControl ||
-                 Event.current.keyCode == KeyCode.LeftShift || Event.current.keyCode == KeyCode.RightShift ||
-                 Event.current.keyCode == KeyCode.LeftAlt || Event.current.keyCode == KeyCode.RightAlt ||
-                 Event.current.keyCode == KeyCode.LeftCommand || Event.current.keyCode == KeyCode.RightCommand))
+                capturingShortcut = 0;
+                Event.current.Use();
+                return;
+            }
+            if (IsModifierKey(Event.current.keyCode))
             {
+                Event.current.Use();
                 return;
             }
 
+            KeyCode[] modifiers = new List<KeyCode>
+            {
+                PressedModifier(Event.current.control, KeyCode.LeftControl, KeyCode.RightControl),
+                PressedModifier(Event.current.shift, KeyCode.LeftShift, KeyCode.RightShift),
+                PressedModifier(Event.current.alt, KeyCode.LeftAlt, KeyCode.RightAlt),
+                PressedModifier(Event.current.command, KeyCode.LeftCommand, KeyCode.RightCommand)
+            }.Where(key => key != KeyCode.None).ToArray();
             BepInEx.Configuration.KeyboardShortcut shortcut =
                 new BepInEx.Configuration.KeyboardShortcut(Event.current.keyCode, modifiers);
             if (capturingShortcut == 1) Plugin.menuShortcut.Value = shortcut;
             else if (capturingShortcut == 2) Plugin.rescueShortcut.Value = shortcut;
-            else Plugin.autoPilotShortcut.Value = shortcut;
+            else return;
             Plugin.SaveSettings();
             capturingShortcut = 0;
             Event.current.Use();
+        }
+
+        private static bool IsModifierKey(KeyCode key) =>
+            key == KeyCode.LeftControl || key == KeyCode.RightControl ||
+            key == KeyCode.LeftShift || key == KeyCode.RightShift ||
+            key == KeyCode.LeftAlt || key == KeyCode.RightAlt ||
+            key == KeyCode.LeftCommand || key == KeyCode.RightCommand;
+
+        private static KeyCode PressedModifier(bool active, KeyCode left, KeyCode right)
+        {
+            if (!active) return KeyCode.None;
+            return Input.GetKey(right) ? right : left;
         }
 
         private static void DrawLocalShortcutSettings()
@@ -682,8 +651,9 @@ namespace SephiriaTogether
                 GUILayout.Label(MenuText.Get("PressNewShortcut"), muted);
                 if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
                     capturingShortcut = 0;
+                return;
             }
-            else if (GUILayout.Button(MenuText.Get("ChangeShortcut"), button, GUILayout.Height(30f)))
+            if (GUILayout.Button(MenuText.Get("ChangeShortcut"), button, GUILayout.Height(30f)))
             {
                 capturingShortcut = 1;
             }
@@ -697,476 +667,88 @@ namespace SephiriaTogether
                 return;
             }
 
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(MenuText.Get("ChangeRescueShortcut"), button, GUILayout.Height(30f)))
+            int shortcutAction = DrawButtonGrid(new[]
+            {
+                MenuText.Get("ChangeRescueShortcut"), MenuText.Get("ClearShortcut")
+            }, -1, IsNarrow ? 1 : 2, 30f);
+            if (shortcutAction == 0)
                 capturingShortcut = 2;
-            GUI.enabled = Plugin.IsShortcutBound(Plugin.rescueShortcut.Value);
-            if (GUILayout.Button(MenuText.Get("ClearShortcut"), button, GUILayout.Width(120f), GUILayout.Height(30f)))
+            if (shortcutAction == 1 && Plugin.IsShortcutBound(Plugin.rescueShortcut.Value))
             {
                 Plugin.rescueShortcut.Value = BepInEx.Configuration.KeyboardShortcut.Empty;
                 Plugin.SaveSettings();
             }
+        }
+
+        private static void DrawManualInventoryArrangementControls()
+        {
+            BeginSection(MenuText.Get("ManualArrangeInventorySection"));
+            GUILayout.Label(MenuText.Get("ManualArrangeInventoryHelp"), muted);
+            GUI.enabled = ManualInventoryArrangement.CanArrange;
+            if (GUILayout.Button(MenuText.Get("ManualArrangeInventory"), primaryButton, GUILayout.Height(32f)))
+            {
+                ManualInventoryArrangement.ClearStatus();
+                ManualInventoryArrangement.ArrangeNow();
+            }
             GUI.enabled = true;
-            GUILayout.EndHorizontal();
+            if (!string.IsNullOrEmpty(ManualInventoryArrangement.Status))
+                GUILayout.Label(ManualInventoryArrangement.Status, muted);
+            EndSection();
         }
 
         private static void DrawClientPage()
         {
             CatchUpRewards.SendHello();
-            if (selectedTab == 2)
-            {
-                DrawClientCompensation();
-                return;
-            }
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
-            GUILayout.Space(8f);
             string heading = selectedTab == 0 ? MenuText.Get("TabRules")
-                : selectedTab == 3 ? MenuText.Get("TabDiagnostics") : MenuText.Get("TabHistory");
+                : selectedTab == 2 ? MenuText.Get("TabDiagnostics") : MenuText.Get("TabHistory");
             string content = selectedTab == 0 ? CatchUpRewards.ClientRules
-                : selectedTab == 3 ? CatchUpRewards.ClientDiagnostics : CatchUpRewards.ClientHistory;
+                : selectedTab == 2 ? CatchUpRewards.ClientDiagnostics : CatchUpRewards.ClientHistory;
             if (selectedTab == 0)
             {
                 BeginSection(MenuText.Get("LocalShortcuts"));
                 DrawLocalShortcutSettings();
                 EndSection();
+                DrawManualInventoryArrangementControls();
+                DrawDirectConnectControls();
             }
             BeginSection(heading);
             GUILayout.Label(string.IsNullOrEmpty(content) ? MenuText.Get("NoData") : content, body);
-            if (selectedTab == 3)
+            if (selectedTab == 2)
             {
                 DrawDownloadLinks();
             }
             EndSection();
-            GUILayout.EndScrollView();
         }
 
-        private static void DrawAutoPilotPage()
+        private static void DrawDirectConnectControls()
         {
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
-            GUILayout.Space(8f);
-            BeginSection(MenuText.Get("TabAutoPilot"));
-            DrawLocalAutoPilotControls();
-            DrawAutoChoiceSettings();
+            if (string.IsNullOrEmpty(directPortText)) directPortText = IpTransport.ConfiguredPort.ToString();
+            BeginSection(MenuText.Get("DirectConnect"));
+            GUILayout.Label(MenuText.Get("DirectConnectHelp"), muted);
+            if (IpTransport.IsOfflineEnvironment)
+                GUILayout.Label(MenuText.Get("IpOfflineAutomatic"), body);
+            else
+                DrawToggle(MenuText.Get("DirectMode"), Plugin.directModeEnabled);
+            GUILayout.Label(MenuText.Get("DirectPort"), body);
+            directPortText = GUILayout.TextField(directPortText ?? "", input, GUILayout.Height(30f));
+            if (int.TryParse(directPortText, out int parsedPort) && parsedPort >= 1 && parsedPort <= 65535)
+            {
+                Plugin.directPort.Value = parsedPort;
+            }
+            GUILayout.Label(MenuText.Get(IpTransport.IsActive ? "IpTransportActive" : "IpRestartRequired"), muted);
             EndSection();
-            GUILayout.EndScrollView();
-        }
-
-        private static void DrawAutoChoiceSettings()
-        {
-            GUILayout.Space(8f);
-            GUILayout.Label(MenuText.Get("AutoChoiceStrategy"), section);
-            GUILayout.BeginHorizontal();
-            string[] labels = { "AutoChoicePresetFirst", "AutoChoiceFavoriteFirst", "AutoChoiceWait" };
-            for (int i = 0; i < labels.Length; i++)
-                if (GUILayout.Button(MenuText.Get(labels[i]), Plugin.autoChoiceStrategy.Value == i ? primaryButton : button,
-                        GUILayout.Height(32f)))
-                {
-                    Plugin.autoChoiceStrategy.Value = i;
-                    if (i != 0 && autoPresetTab == 0) autoPresetTab = 1;
-                    Plugin.SaveSettings();
-                }
-            GUILayout.EndHorizontal();
-            GUILayout.Space(6f);
-            GUILayout.Label(MenuText.Get("FullInventoryStrategy"), body);
-            GUILayout.BeginHorizontal();
-            string[] fullLabels = { "FullInventoryWait", "FullInventoryCharm", "FullInventoryOrdinary" };
-            for (int i = 0; i < fullLabels.Length; i++)
-                if (GUILayout.Button(MenuText.Get(fullLabels[i]),
-                        Plugin.autoFullInventoryStrategy.Value == i ? primaryButton : button, GUILayout.Height(30f)))
-                {
-                    Plugin.autoFullInventoryStrategy.Value = i;
-                    Plugin.SaveSettings();
-                }
-            GUILayout.EndHorizontal();
-            GUILayout.Label(MenuText.Get("FullInventoryHelp"), muted);
-            GUILayout.Space(8f);
-            GUILayout.BeginHorizontal();
-            string[] tabs = { "RewardPresetTab", "WeaponPresetTab", "MiraclePresetTab", "FloorPresetTab" };
-            for (int i = 0; i < tabs.Length; i++)
-            {
-                bool disabled = i == 0 && Plugin.autoChoiceStrategy.Value != 0;
-                GUI.enabled = !disabled;
-                if (GUILayout.Button(MenuText.Get(tabs[i]), disabled ? toggleOff : autoPresetTab == i ? primaryButton : button,
-                        GUILayout.Height(30f)))
-                {
-                    autoPresetTab = i;
-                    showRewardDropdown = false;
-                    showWeaponDropdown = false;
-                    showMiracleDropdown = false;
-                    showFloorDropdown = false;
-                }
-                GUI.enabled = true;
-            }
-            GUILayout.EndHorizontal();
-
-            GUILayout.BeginVertical(card);
-            if (autoPresetTab == 0)
-                DrawPresetPicker(MenuText.Get("RewardPresets"), MenuText.Get("RewardPresetsHelp"),
-                    RewardPresetOptions, Plugin.autoChoicePresets, ref selectedRewardPreset,
-                    ref showRewardDropdown, ref rewardDropdownScroll);
-            else if (autoPresetTab == 1)
-            {
-                if (!string.IsNullOrEmpty(weaponPresetStatus)) GUILayout.Label(weaponPresetStatus, muted);
-                DrawPresetPicker(MenuText.Get("WeaponPresets"), MenuText.Get("WeaponPresetsHelp"),
-                    WeaponPresetOptions, Plugin.autoWeaponPresets, ref selectedWeaponPreset,
-                    ref showWeaponDropdown, ref weaponDropdownScroll);
-            }
-            else if (autoPresetTab == 2)
-                DrawPresetPicker(MenuText.Get("MiraclePresets"), MenuText.Get("MiraclePresetsHelp"),
-                    MiraclePresetOptions, Plugin.autoMiraclePresets, ref selectedMiraclePreset,
-                    ref showMiracleDropdown, ref miracleDropdownScroll);
-            else
-                DrawPresetPicker(MenuText.Get("FloorPresets"), MenuText.Get("FloorPresetsHelp"),
-                    FloorPresetOptions, Plugin.autoFloorPresets, ref selectedFloorPreset,
-                    ref showFloorDropdown, ref floorDropdownScroll);
-            GUILayout.EndVertical();
-        }
-
-        private static void DrawLocalAutoPilotControls()
-        {
-            GUILayout.Space(8f);
-            GUILayout.Label(MenuText.Get("AutoPilotLocalSettings"), section);
-            DrawValue(MenuText.Get("AutoPilotShortcut"), Plugin.FormatShortcut(Plugin.autoPilotShortcut.Value), 180f);
-            if (capturingShortcut == 3)
-            {
-                GUILayout.Label(MenuText.Get("PressNewAutoPilotShortcut"), muted);
-                if (GUILayout.Button(MenuText.Get("CancelShortcut"), button, GUILayout.Height(30f)))
-                    capturingShortcut = 0;
-            }
-            else
-            {
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button(MenuText.Get("ChangeAutoPilotShortcut"), button, GUILayout.Height(30f)))
-                    capturingShortcut = 3;
-                GUI.enabled = Plugin.IsShortcutBound(Plugin.autoPilotShortcut.Value);
-                if (GUILayout.Button(MenuText.Get("ClearShortcut"), button, GUILayout.Width(120f), GUILayout.Height(30f)))
-                {
-                    Plugin.autoPilotShortcut.Value = BepInEx.Configuration.KeyboardShortcut.Empty;
-                    Plugin.SaveSettings();
-                }
-                GUI.enabled = true;
-                GUILayout.EndHorizontal();
-            }
-            GUILayout.Label(MenuText.Get("AutoPilotHelp"), muted);
-            if (GUILayout.Button(MenuText.Get(AutoPilot.Enabled ? "DisableAutoPilot" : "EnableAutoPilot"),
-                    AutoPilot.Enabled ? dangerButton : primaryButton, GUILayout.Height(34f)))
-                AutoPilot.Toggle();
-            GUILayout.Space(6f);
-            GUILayout.Label(MenuText.Get("AutoAttackMode"), body);
-            string[] attackModes = { "AutoAttackLeftOnly", "AutoAttackPrimary", "AutoAttackRightOnly", "AutoAttackSecondary" };
-            int[] attackModeValues = { 2, 0, 3, 1 };
-            for (int row = 0; row < 2; row++)
-            {
-                GUILayout.BeginHorizontal();
-                for (int column = 0; column < 2; column++)
-                {
-                    int index = row * 2 + column;
-                    if (GUILayout.Button(MenuText.Get(attackModes[index]),
-                            Plugin.autoAttackMode.Value == attackModeValues[index] ? primaryButton : button,
-                            GUILayout.Height(30f)))
-                    {
-                        Plugin.autoAttackMode.Value = attackModeValues[index];
-                        Plugin.SaveSettings();
-                    }
-                }
-                GUILayout.EndHorizontal();
-            }
-            GUILayout.Label(MenuText.Get("AutoAttackModeHelp"), muted);
-            DrawToggle(MenuText.Get("AutoArrangeInventory"), Plugin.autoArrangeInventory);
-            GUILayout.Label(MenuText.Get("AutoArrangeInventoryHelp"), muted);
-            GUI.enabled = AutoPilot.CanManualArrangeInventory;
-            if (GUILayout.Button(MenuText.Get("ManualArrangeInventory"), button, GUILayout.Height(32f)))
-                AutoPilot.ArrangeInventoryNow();
-            GUI.enabled = true;
-            if (!string.IsNullOrEmpty(AutoPilot.ManualArrangeStatus))
-                GUILayout.Label(AutoPilot.ManualArrangeStatus, muted);
-            DrawToggle(MenuText.Get("AutoDefend"), Plugin.autoDefend);
-            GUILayout.Label(MenuText.Get("AutoDefendHelp"), muted);
-        }
-
-        private static void DrawPresetPicker(string heading, string help, List<PresetOption> options,
-            BepInEx.Configuration.ConfigEntry<string> config, ref int selected, ref bool expanded, ref Vector2 dropdownScroll)
-        {
-            GUILayout.Label(heading, section);
-            List<string> values = SplitPresetValues(config.Value);
-            if (values.Count == 0) GUILayout.Label(MenuText.Get("NoPresetSelected"), muted);
-            else DrawPresetTags(options, config, values);
-
-            if (options.Count > 0)
-            {
-                selected = Mathf.Clamp(selected, 0, options.Count - 1);
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button(options[selected].Label + (expanded ? "  ▲" : "  ▼"), button, GUILayout.Height(32f)))
-                    expanded = !expanded;
-                if (GUILayout.Button(MenuText.Get("AddPreset"), primaryButton, GUILayout.Width(100f), GUILayout.Height(32f)) &&
-                    !values.Contains(options[selected].Value))
-                {
-                    values.Add(options[selected].Value);
-                    SavePresetValues(config, values);
-                }
-                GUILayout.EndHorizontal();
-                if (expanded)
-                {
-                    dropdownScroll = GUILayout.BeginScrollView(dropdownScroll, GUILayout.Height(180f),
-                        GUILayout.ExpandWidth(true));
-                    for (int i = 0; i < options.Count; i++)
-                        if (GUILayout.Button(options[i].Label, i == selected ? primaryButton : button, GUILayout.Height(28f)))
-                        {
-                            selected = i;
-                            expanded = false;
-                        }
-                    GUILayout.EndScrollView();
-                }
-            }
-            else if (config != Plugin.autoWeaponPresets || string.IsNullOrEmpty(weaponPresetStatus))
-                GUILayout.Label(MenuText.Get("PresetDataUnavailable"), muted);
-            GUILayout.Label(help, muted);
-        }
-
-        private static void DrawPresetTags(List<PresetOption> options,
-            BepInEx.Configuration.ConfigEntry<string> config, List<string> values)
-        {
-            float available = Mathf.Max(260f, window.width - 70f);
-            float used = 0f;
-            GUILayout.BeginHorizontal();
-            foreach (string value in values.ToArray())
-            {
-                string label = PresetLabel(options, value) + "  X";
-                float width = Mathf.Clamp(tagButton.CalcSize(new GUIContent(label)).x + 10f, 78f, available);
-                if (used > 0f && used + width + 5f > available)
-                {
-                    GUILayout.EndHorizontal();
-                    GUILayout.BeginHorizontal();
-                    used = 0f;
-                }
-                if (GUILayout.Button(label, tagButton, GUILayout.Width(width), GUILayout.Height(28f)))
-                {
-                    values.Remove(value);
-                    SavePresetValues(config, values);
-                }
-                used += width + 5f;
-            }
-            GUILayout.FlexibleSpace();
-            GUILayout.EndHorizontal();
-        }
-
-        private static void RefreshPresetOptions()
-        {
-            RewardPresetOptions.Clear();
-            WeaponPresetOptions.Clear();
-            MiraclePresetOptions.Clear();
-            FloorPresetOptions.Clear();
-            weaponPresetStatus = null;
-            try
-            {
-                foreach (ItemCategoryEntity category in Resources.LoadAll<ItemCategoryEntity>("ItemCategory")
-                             .Where(category => category != null && category.isEnabled &&
-                                                IsValidDisplayName(category.Name, category.categoryName.key))
-                             .OrderBy(category => category.Name))
-                    RewardPresetOptions.Add(new PresetOption("category:" + category.id,
-                        MenuText.Get("CategoryPrefix") + category.Name, category.id, category.Name,
-                        category.categoryName.key));
-
-                foreach (int id in ItemDatabase.GetAllItemID())
-                {
-                    ItemEntity item = ItemDatabase.FindItemById(id);
-                    if (item != null && !item.cannotBeReward && IsValidDisplayName(item.Name, item.aName.key))
-                        RewardPresetOptions.Add(new PresetOption("item:" + item.id, item.Name,
-                            item.id.ToString(), item.Name, item.aName.key));
-                }
-                RewardPresetOptions.Sort((left, right) => string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
-
-                PlayerAvatar localPlayer = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
-                WeaponControllerSimple weaponController = localPlayer != null
-                    ? localPlayer.GetComponent<WeaponControllerSimple>()
-                    : null;
-                WeaponSimple currentWeapon = weaponController != null ? weaponController.currentWeapon : null;
-                if (currentWeapon == null)
-                {
-                    weaponPresetStatus = MenuText.Get("WeaponPresetNoWeapon");
-                }
-                else
-                {
-                    List<EnhancementMetadata> enhancements = WeaponDatabase.GetWeaponEnhancements(currentWeapon.entityId);
-                    if (enhancements == null || enhancements.Count == 0)
-                    {
-                        weaponPresetStatus = MenuText.Get("WeaponPresetMaxed");
-                    }
-                    else
-                    {
-                        AddReachableWeaponOptions(currentWeapon.entityId, 1, new HashSet<int>());
-                        WeaponEntity equipped = WeaponDatabase.FindWeaponById(currentWeapon.entityId);
-                        string currentName = equipped != null ? equipped.Name : currentWeapon.entityId.ToString();
-                        weaponPresetStatus = string.Format(MenuText.Get("WeaponPresetCurrent"), currentName);
-                    }
-                }
-                WeaponPresetOptions.Sort((left, right) => string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
-
-                IEnumerable<Miracle> miracles;
-                try
-                {
-                    miracles = MiracleDatabase.GetAll() ?? Enumerable.Empty<Miracle>();
-                }
-                catch
-                {
-                    miracles = Enumerable.Empty<Miracle>();
-                }
-                foreach (Miracle miracle in miracles
-                             .Where(candidate => candidate != null && candidate.isEnabled &&
-                                                 candidate.tier == Miracle.ETier.Tier1 &&
-                                                 IsValidDisplayName(candidate.Name, candidate.aName.key))
-                             .OrderBy(candidate => candidate.Name))
-                    MiraclePresetOptions.Add(new PresetOption("miracle:" + miracle.id, miracle.Name,
-                        miracle.id, miracle.Name, miracle.aName.key));
-                MiraclePresetOptions.Sort((left, right) =>
-                    string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
-
-                foreach (EFloorMainEventType eventType in Enum.GetValues(typeof(EFloorMainEventType)))
-                {
-                    if (eventType == EFloorMainEventType.None || eventType == EFloorMainEventType.Unknown ||
-                        eventType == EFloorMainEventType.RandomEncounter) continue;
-                    string label = FloorEventLabel(eventType);
-                    FloorPresetOptions.Add(new PresetOption("floor:" + eventType, label, eventType.ToString()));
-                }
-                FloorPresetOptions.Sort((left, right) => string.Compare(left.Label, right.Label, StringComparison.CurrentCulture));
-                MigrateLegacyPresets();
-                RemoveInvalidStablePresets(Plugin.autoChoicePresets, RewardPresetOptions, "item:", "category:");
-                if (currentWeapon != null)
-                    RemoveInvalidStablePresets(Plugin.autoWeaponPresets, WeaponPresetOptions, "weapon:");
-                if (MiraclePresetOptions.Count > 0)
-                    RemoveInvalidStablePresets(Plugin.autoMiraclePresets, MiraclePresetOptions, "miracle:");
-                RemoveInvalidStablePresets(Plugin.autoFloorPresets, FloorPresetOptions, "floor:");
-            }
-            catch (Exception exception)
-            {
-                Plugin.LogInfo("Could not load autopilot preset options: " + exception.Message);
-            }
-        }
-
-        private static List<string> SplitPresetValues(string value) => (value ?? "")
-            .Split(new[] { ',', '，', ';', '；', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-            .Select(entry => entry.Trim()).Where(entry => entry.Length > 0).ToList();
-
-        private static string PresetLabel(List<PresetOption> options, string value)
-        {
-            PresetOption option = options.FirstOrDefault(candidate =>
-                string.Equals(candidate.Value, value, StringComparison.OrdinalIgnoreCase) || candidate.MatchesLegacy(value));
-            return option != null ? option.Label : MenuText.Get("UnavailablePreset");
-        }
-
-        private static bool IsValidDisplayName(string value, string localizationKey)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return false;
-            string clean = System.Text.RegularExpressions.Regex.Replace(value, "<[^>]+>", "").Trim();
-            if (clean.Length < 2 || !clean.Any(char.IsLetterOrDigit)) return false;
-            if (!string.IsNullOrEmpty(localizationKey) &&
-                string.Equals(clean, localizationKey, StringComparison.OrdinalIgnoreCase)) return false;
-            return !(clean.StartsWith("Item_", StringComparison.OrdinalIgnoreCase) &&
-                     clean.EndsWith("_Name", StringComparison.OrdinalIgnoreCase));
-        }
-
-        private static void AddReachableWeaponOptions(int weaponId, int tier, HashSet<int> visited)
-        {
-            if (!visited.Add(weaponId)) return;
-            foreach (EnhancementMetadata enhancement in
-                     WeaponDatabase.GetWeaponEnhancements(weaponId) ?? new List<EnhancementMetadata>())
-            {
-                WeaponEntity weapon = enhancement?.enhanced;
-                if (weapon == null || !enhancement.enabled) continue;
-                if (IsValidDisplayName(weapon.Name, weapon.aName.key) &&
-                    !WeaponPresetOptions.Any(option => option.Value == "weapon:" + weapon.id))
-                    WeaponPresetOptions.Add(new PresetOption("weapon:" + weapon.id,
-                        string.Format(MenuText.Get("WeaponPresetTier"), tier, weapon.Name),
-                        weapon.id.ToString(), weapon.Name, weapon.aName.key));
-                AddReachableWeaponOptions(weapon.id, tier + 1, visited);
-            }
-        }
-
-        private static string FloorEventLabel(EFloorMainEventType eventType)
-        {
-            switch (eventType)
-            {
-                case EFloorMainEventType.Money: return MenuText.Get("RoomMoney");
-                case EFloorMainEventType.EXP: return MenuText.Get("RoomExp");
-                case EFloorMainEventType.HP: return MenuText.Get("RoomHeal");
-                case EFloorMainEventType.Merchant: return MenuText.Get("RoomMerchant");
-                case EFloorMainEventType.Miracle: return MenuText.Get("RoomMiracle");
-                case EFloorMainEventType.Charm: return MenuText.Get("RoomCharm");
-                case EFloorMainEventType.StoneTablet: return MenuText.Get("RoomTablet");
-                case EFloorMainEventType.Enchant: return MenuText.Get("RoomEnchant");
-                case EFloorMainEventType.Anvil: return MenuText.Get("RoomAnvil");
-                case EFloorMainEventType.Dice: return MenuText.Get("RoomDice");
-                case EFloorMainEventType.Sapphire: return MenuText.Get("RoomSapphire");
-                case EFloorMainEventType.MaxHP: return MenuText.Get("RoomMaxHp");
-                case EFloorMainEventType.InventoryStorage: return MenuText.Get("RoomInventory");
-                default: return MenuText.Get("UnknownFloorEvent");
-            }
-        }
-
-        private static void MigrateLegacyPresets()
-        {
-            List<string> legacy = SplitPresetValues(Plugin.autoChoicePresets.Value);
-            if (!legacy.Any(value => value.IndexOf(':') < 0)) return;
-
-            List<string> rewards = legacy.Where(value => value.IndexOf(':') >= 0).ToList();
-            List<string> weapons = SplitPresetValues(Plugin.autoWeaponPresets.Value);
-            foreach (string value in legacy.Where(value => value.IndexOf(':') < 0))
-            {
-                PresetOption reward = RewardPresetOptions.FirstOrDefault(option => option.MatchesLegacy(value));
-                PresetOption weapon = WeaponPresetOptions.FirstOrDefault(option => option.MatchesLegacy(value));
-                if (reward != null && !rewards.Contains(reward.Value)) rewards.Add(reward.Value);
-                if (weapon != null && !weapons.Contains(weapon.Value)) weapons.Add(weapon.Value);
-                if (reward == null && weapon == null) rewards.Add(value);
-            }
-            SavePresetValues(Plugin.autoChoicePresets, rewards);
-            SavePresetValues(Plugin.autoWeaponPresets, weapons);
-        }
-
-        private static void SavePresetValues(BepInEx.Configuration.ConfigEntry<string> config, List<string> values)
-        {
-            config.Value = string.Join(",", values);
-            Plugin.SaveSettings();
-        }
-
-        private static void RemoveInvalidStablePresets(BepInEx.Configuration.ConfigEntry<string> config,
-            List<PresetOption> options, params string[] prefixes)
-        {
-            List<string> values = SplitPresetValues(config.Value);
-            int removed = values.RemoveAll(value => prefixes.Any(prefix =>
-                value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) &&
-                !options.Any(option => string.Equals(option.Value, value, StringComparison.OrdinalIgnoreCase)));
-            if (removed > 0) SavePresetValues(config, values);
-        }
-
-        private sealed class PresetOption
-        {
-            internal readonly string Value;
-            internal readonly string Label;
-            private readonly string[] aliases;
-
-            internal PresetOption(string value, string label, params string[] aliases)
-            {
-                Value = value;
-                Label = label;
-                this.aliases = aliases ?? new string[0];
-            }
-
-            internal bool MatchesLegacy(string value) => !string.IsNullOrWhiteSpace(value) && aliases.Any(alias =>
-                !string.IsNullOrEmpty(alias) && alias.IndexOf(value, StringComparison.OrdinalIgnoreCase) >= 0);
         }
 
         private static void DrawHostPage()
         {
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
-            GUILayout.Space(8f);
-            if (selectedTab == 2)
+            if (selectedTab == 1)
             {
                 BeginSection(MenuText.Get("TabCompensation"));
                 GUILayout.Label(MenuText.Get("HostCompensation"), body);
                 EndSection();
                 DrawPlayers();
             }
-            else if (selectedTab == 3)
+            else if (selectedTab == 2)
             {
                 BeginSection(MenuText.Get("TabDiagnostics"));
                 GUILayout.Label(CatchUpRewards.BuildHostDiagnostics(null), body);
@@ -1180,19 +762,20 @@ namespace SephiriaTogether
                 GUILayout.Label(string.IsNullOrEmpty(history) ? MenuText.Get("NoData") : history, body);
                 EndSection();
             }
-            GUILayout.EndScrollView();
         }
 
         private static void DrawDownloadLinks()
         {
             GUILayout.Space(10f);
             GUILayout.Label(MenuText.Get("DownloadHelp"), muted);
-            GUILayout.BeginHorizontal();
-            if (GUILayout.Button(MenuText.Get("OpenReleasePage"), button, GUILayout.Height(32f)))
+            int action = DrawButtonGrid(new[]
+            {
+                MenuText.Get("OpenReleasePage"), MenuText.Get("OpenPluginDownload")
+            }, -1, IsNarrow ? 1 : 2, 34f);
+            if (action == 0)
                 Application.OpenURL(CatchUpRewards.ReleasePageUrl);
-            if (GUILayout.Button(MenuText.Get("OpenPluginDownload"), primaryButton, GUILayout.Height(32f)))
+            if (action == 1)
                 Application.OpenURL(CatchUpRewards.PluginZipUrl);
-            GUILayout.EndHorizontal();
         }
 
         internal static void ResetClientCompensation()
@@ -1202,27 +785,35 @@ namespace SephiriaTogether
 
         private static void DrawPlayers()
         {
-            int count = CloneBotManager.RealPlayerCount;
+            int count = Plugin.PlayerCount;
             GUILayout.Label(MenuText.Get("Players") + "  " + count, section);
             if (PlayerSpawner.MultiplayerList == null) return;
             foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList.ToArray())
             {
-                if (CloneBotManager.IsBot(player)) continue;
                 if (player == null || player.PlayerAvatar == null) continue;
                 LevelController level = player.GetComponent<LevelController>();
                 GUILayout.BeginVertical(playerCard);
-                GUILayout.BeginHorizontal();
-                GUILayout.Label(player.PlayerAvatar.Name, section);
-                GUILayout.FlexibleSpace();
                 string state = player.isHost ? MenuText.Get("Host") : player.PlayerAvatar.IsDead
                     ? MenuText.Get("Dead") : string.IsNullOrEmpty(player.PlayerAvatar.currentFloorGuid)
                         ? MenuText.Get("Loading") : MenuText.Get("Connected");
-                GUILayout.Label(state, badge, GUILayout.Width(90f), GUILayout.Height(26f));
-                GUILayout.EndHorizontal();
-                string details = MenuText.Get("Level") + " " + (level != null ? level.currentLevel : 0) +
-                                  "     " + MenuText.Get("Health") + " " + player.PlayerAvatar.hp.ToString("0") + " / " + player.PlayerAvatar.MaxHp.ToString("0") +
-                                  "     " + MenuText.Get("Floor") + " " + FloorDisplay.Format(player.PlayerAvatar.currentFloorGuid);
-                GUILayout.Label(details, muted);
+                DrawCardHeader(player.PlayerAvatar.Name, state);
+                if (IsNarrow)
+                {
+                    GUILayout.Label(MenuText.Get("Level") + "  " + (level != null ? level.currentLevel : 0), muted);
+                    GUILayout.Label(MenuText.Get("Health") + "  " + player.PlayerAvatar.hp.ToString("0") + " / " +
+                                    player.PlayerAvatar.MaxHp.ToString("0"), muted);
+                    GUILayout.Label(MenuText.Get("Floor") + "  " +
+                                    FloorDisplay.Format(player.PlayerAvatar.currentFloorGuid), muted);
+                }
+                else
+                {
+                    string details = MenuText.Get("Level") + " " + (level != null ? level.currentLevel : 0) +
+                                     "     " + MenuText.Get("Health") + " " + player.PlayerAvatar.hp.ToString("0") +
+                                     " / " + player.PlayerAvatar.MaxHp.ToString("0") +
+                                     "     " + MenuText.Get("Floor") + " " +
+                                     FloorDisplay.Format(player.PlayerAvatar.currentFloorGuid);
+                    GUILayout.Label(details, muted);
+                }
                 if (!player.isHost && player.connectionToClient != null)
                 {
                     if (GUILayout.Button(MenuText.Get("Kick"), dangerButton, GUILayout.Height(30f))) Kick(player);
@@ -1300,31 +891,6 @@ namespace SephiriaTogether
                    Mathf.Approximately(Plugin.MaximumEnemyCountMultiplierValue, countCap);
         }
 
-        private static int ClampPage(int page, int itemCount, int pageSize)
-        {
-            int pageCount = Mathf.Max(1, Mathf.CeilToInt(itemCount / (float)pageSize));
-            return Mathf.Clamp(page, 0, pageCount - 1);
-        }
-
-        private static void DrawPager(ref int page, int itemCount, int pageSize)
-        {
-            int pageCount = Mathf.Max(1, Mathf.CeilToInt(itemCount / (float)pageSize));
-            page = Mathf.Clamp(page, 0, pageCount - 1);
-            if (pageCount <= 1) return;
-
-            GUILayout.BeginHorizontal();
-            GUI.enabled = page > 0;
-            if (GUILayout.Button("<", button, GUILayout.Width(42f), GUILayout.Height(28f))) page--;
-            GUI.enabled = true;
-            GUILayout.FlexibleSpace();
-            GUILayout.Label((page + 1) + " / " + pageCount, badge, GUILayout.Width(90f), GUILayout.Height(28f));
-            GUILayout.FlexibleSpace();
-            GUI.enabled = page < pageCount - 1;
-            if (GUILayout.Button(">", button, GUILayout.Width(42f), GUILayout.Height(28f))) page++;
-            GUI.enabled = true;
-            GUILayout.EndHorizontal();
-        }
-
         private static void BeginSection(string heading)
         {
             GUILayout.BeginVertical(card);
@@ -1340,11 +906,19 @@ namespace SephiriaTogether
 
         private static void DrawValue(string label, string value, float valueWidth = 76f)
         {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(label, body);
-            GUILayout.FlexibleSpace();
-            GUILayout.Label(value, badge, GUILayout.Width(valueWidth), GUILayout.Height(28f));
-            GUILayout.EndHorizontal();
+            if (IsNarrow)
+            {
+                GUILayout.Label(label, body);
+                GUILayout.Label(value, badge, GUILayout.Height(28f));
+            }
+            else
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(label, body);
+                GUILayout.FlexibleSpace();
+                GUILayout.Label(value, badge, GUILayout.Width(valueWidth), GUILayout.Height(28f));
+                GUILayout.EndHorizontal();
+            }
         }
 
         private static void DrawToggle(string label, BepInEx.Configuration.ConfigEntry<bool> setting)
@@ -1354,21 +928,86 @@ namespace SephiriaTogether
 
         private static void DrawToggle(string label, bool enabled, System.Action toggle)
         {
-            GUILayout.BeginHorizontal();
-            GUILayout.Label(label, body);
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button(MenuText.Get(enabled ? "ToggleOn" : "ToggleOff"), enabled ? toggleOn : toggleOff,
-                    GUILayout.Width(72f), GUILayout.Height(30f)))
+            if (IsNarrow)
             {
-                toggle();
+                GUILayout.Label(label, body);
+                if (GUILayout.Button(MenuText.Get(enabled ? "ToggleOn" : "ToggleOff"),
+                        enabled ? toggleOn : toggleOff, GUILayout.Height(30f))) toggle();
             }
+            else
+            {
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(label, body);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button(MenuText.Get(enabled ? "ToggleOn" : "ToggleOff"),
+                        enabled ? toggleOn : toggleOff, GUILayout.Width(72f), GUILayout.Height(30f))) toggle();
+                GUILayout.EndHorizontal();
+            }
+        }
+
+        private static int DrawButtonGrid(string[] labels, int selected, int columns, float height,
+            bool useTabStyles = false, bool firstDanger = false)
+        {
+            int clicked = -1;
+            columns = Mathf.Max(1, columns);
+            const float gap = 4f;
+            for (int row = 0; row < Mathf.CeilToInt(labels.Length / (float)columns); row++)
+            {
+                Rect rowRect = GUILayoutUtility.GetRect(1f, height, GUILayout.ExpandWidth(true));
+                float cellWidth = Mathf.Max(1f, (rowRect.width - gap * (columns - 1)) / columns);
+                for (int column = 0; column < columns; column++)
+                {
+                    int index = row * columns + column;
+                    if (index >= labels.Length) continue;
+                    GUIStyle style = useTabStyles
+                        ? index == selected ? activeTabButton : tabButton
+                        : firstDanger && index == 0 ? dangerButton
+                            : index == selected ? primaryButton : button;
+                    Rect cell = new Rect(rowRect.x + column * (cellWidth + gap), rowRect.y, cellWidth, rowRect.height);
+                    if (GUI.Button(cell, labels[index], style))
+                        clicked = index;
+                }
+                GUILayout.Space(gap);
+            }
+            return clicked;
+        }
+
+        private static void DrawCardHeader(string name, string state)
+        {
+            if (IsNarrow)
+            {
+                GUILayout.Label(name, section);
+                GUILayout.Label(state, badge, GUILayout.Height(26f));
+                return;
+            }
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(name, section);
+            GUILayout.FlexibleSpace();
+            GUILayout.Label(state, badge, GUILayout.Width(90f), GUILayout.Height(26f));
+            GUILayout.EndHorizontal();
+        }
+
+        private static void DrawStepper(string label, string value, System.Action decrease, System.Action increase)
+        {
+            if (IsNarrow) GUILayout.Label(label, body);
+            GUILayout.BeginHorizontal();
+            if (!IsNarrow)
+            {
+                GUILayout.Label(label, body);
+                GUILayout.FlexibleSpace();
+            }
+            if (GUILayout.Button("-", button, GUILayout.Width(44f), GUILayout.Height(30f))) decrease();
+            GUILayout.Label(value, badge, GUILayout.Width(64f), GUILayout.Height(30f));
+            if (GUILayout.Button("+", button, GUILayout.Width(44f), GUILayout.Height(30f))) increase();
             GUILayout.EndHorizontal();
         }
 
         private static void DrawDivider()
         {
+            GUILayout.Space(4f);
             Rect divider = GUILayoutUtility.GetRect(1f, 1f, GUILayout.ExpandWidth(true));
             GUI.DrawTexture(divider, buttonTexture);
+            GUILayout.Space(4f);
         }
 
         private static Texture2D MakeTexture(Color color)
@@ -1420,11 +1059,24 @@ namespace SephiriaTogether
             input.normal.textColor = text;
             input.focused.background = inputTexture;
             input.focused.textColor = Color.white;
+            pathInput = new GUIStyle(input)
+            {
+                alignment = TextAnchor.MiddleLeft,
+                wordWrap = false
+            };
             badge = new GUIStyle(body) { alignment = TextAnchor.MiddleCenter, fontStyle = FontStyle.Bold, padding = new RectOffset(7, 7, 3, 3) };
+            badge.wordWrap = false;
             badge.normal.background = buttonTexture;
-            tagButton = CreateButtonStyle(buttonTexture, dangerTexture, text);
-            tagButton.fontStyle = FontStyle.Normal;
-            tagButton.padding = new RectOffset(9, 9, 4, 4);
+            tabButton = CreateButtonStyle(buttonTexture, buttonHoverTexture, text);
+            tabButton.fontSize = 12;
+            tabButton.wordWrap = true;
+            tabButton.alignment = TextAnchor.MiddleCenter;
+            tabButton.padding = new RectOffset(5, 5, 5, 5);
+            activeTabButton = CreateButtonStyle(primaryTexture, primaryHoverTexture, Color.white);
+            activeTabButton.fontSize = 12;
+            activeTabButton.wordWrap = true;
+            activeTabButton.alignment = TextAnchor.MiddleCenter;
+            activeTabButton.padding = new RectOffset(5, 5, 5, 5);
             toggleOn = CreateButtonStyle(primaryTexture, primaryHoverTexture, Color.white);
             toggleOff = CreateButtonStyle(buttonTexture, buttonHoverTexture, dim);
         }
@@ -1435,7 +1087,9 @@ namespace SephiriaTogether
             {
                 fontSize = 13,
                 fontStyle = FontStyle.Bold,
-                padding = new RectOffset(10, 10, 6, 6)
+                padding = new RectOffset(10, 10, 6, 6),
+                margin = new RectOffset(2, 2, 2, 2),
+                alignment = TextAnchor.MiddleCenter
             };
             style.normal.background = normal;
             style.normal.textColor = textColor;
@@ -1450,7 +1104,7 @@ namespace SephiriaTogether
 
         private static void Kick(PlayerSpawner player)
         {
-            if (!NetworkServer.active || player == null || CloneBotManager.IsBot(player) ||
+            if (!NetworkServer.active || player == null ||
                 player.connectionToClient == null) return;
             player.connectionToClient.Disconnect();
         }

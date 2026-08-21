@@ -6,7 +6,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>SephiriaTogether</AssemblyName>
     <RootNamespace>SephiriaTogether</RootNamespace>
-    <Version>3.6.0</Version>
+    <Version>3.7.0</Version>
     <GameDir Condition="'$(GameDir)' == '' and '$(SEPHIRIA_DIR)' != ''">$(SEPHIRIA_DIR)</GameDir>
   </PropertyGroup>
 
@@ -29,6 +29,10 @@
     </Reference>
     <Reference Include="Mirror.Components">
       <HintPath>$(GameDir)\Sephiria_Data\Managed\Mirror.Components.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Mirror.Transports">
+      <HintPath>$(GameDir)\Sephiria_Data\Managed\Mirror.Transports.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Heathen.Steamworks">

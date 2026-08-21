@@ -58,7 +58,7 @@ namespace SephiriaTogether
 
         internal static void OnFloorChanged(PlayerAvatar player, string floorGuid)
         {
-            if (!NetworkServer.active || player?.spawner == null || CloneBotManager.IsBot(player.spawner) ||
+            if (!NetworkServer.active || player?.spawner == null ||
                 string.IsNullOrEmpty(floorGuid)) return;
             Plugin.LogInfo($"Floor changed: player={player.Name}, floor={Short(floorGuid)}, pos={player.transform.position}, " +
                            $"dead={player.IsDead}, event={FloorEvent(floorGuid)}.");

@@ -16,7 +16,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.6.0";
+        public const string PluginVersion = "3.7.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> baseEnemyMultiplier;
@@ -34,23 +34,12 @@ namespace SephiriaTogether
         internal static ConfigEntry<int> playerLimit;
         internal static ConfigEntry<KeyboardShortcut> menuShortcut;
         internal static ConfigEntry<KeyboardShortcut> rescueShortcut;
-        internal static ConfigEntry<KeyboardShortcut> autoPilotShortcut;
-        internal static ConfigEntry<int> autoChoiceStrategy;
-        internal static ConfigEntry<string> autoChoicePresets;
-        internal static ConfigEntry<string> autoWeaponPresets;
-        internal static ConfigEntry<string> autoMiraclePresets;
-        internal static ConfigEntry<string> autoFloorPresets;
-        internal static ConfigEntry<bool> autoArrangeInventory;
-        internal static ConfigEntry<int> autoFullInventoryStrategy;
-        internal static ConfigEntry<bool> autoDefend;
-        internal static ConfigEntry<int> autoAttackMode;
-        private static ConfigEntry<bool> autoFloorDefaultsInitialized;
-        private static ConfigEntry<bool> autoMiracleDefaultsInitialized;
-        internal static ConfigEntry<bool> autoReviveWhenClear;
+        internal static ConfigEntry<bool> reviveWhenClear;
         internal static ConfigEntry<bool> bossLifesteal;
+        internal static ConfigEntry<bool> directModeEnabled;
+        internal static ConfigEntry<int> directPort;
         private Harmony harmony;
         private bool lastF8Held;
-        private bool lastF9Held;
         private float nextShortcutToggle;
 
         private void Awake()
@@ -74,97 +63,24 @@ namespace SephiriaTogether
                 "RescueShortcut",
                 new KeyboardShortcut(KeyCode.R),
                 "Optional shortcut a downed player uses to request rescue from modded teammates.");
-            autoPilotShortcut = Config.Bind(
-                "Interface",
-                "AutoPilotShortcut",
-                new KeyboardShortcut(KeyCode.F9),
-                "Optional shortcut used to enable or disable conservative AFK autopilot. It can also be controlled from the menu.");
-            autoChoiceStrategy = Config.Bind(
-                "Autopilot",
-                "ChoiceStrategy",
-                0,
-                new ConfigDescription(
-                    "0: prefer preset matches, 1: prefer heart-marked favorites, 2: always wait. Prefer modes fall back to a random highest-rarity reward.",
-                    new AcceptableValueRange<int>(0, 2)));
-            autoChoicePresets = Config.Bind(
-                "Autopilot",
-                "ChoicePresets",
-                "FlameSword,Precision,WindSong",
-                "Ordered reward item/category IDs preferred by autopilot. Configure this from the F8 menu.");
-            autoWeaponPresets = Config.Bind(
-                "Autopilot",
-                "WeaponPresets",
-                "",
-                "Ordered weapon enhancement IDs preferred by autopilot. Configure this from the F8 menu.");
-            autoMiraclePresets = Config.Bind(
-                "Autopilot",
-                "MiraclePresets",
-                "miracle:Hunter",
-                "Ordered Miracle IDs preferred by autopilot. Empty skips Miracle choices; unmatched offers reroll while dice remain, then skip.");
-            autoMiracleDefaultsInitialized = Config.Bind(
-                "Autopilot",
-                "MiracleDefaultsInitialized",
-                false,
-                "Internal migration marker for the default Miracle priority.");
-            if (!autoMiracleDefaultsInitialized.Value)
-            {
-                if (string.IsNullOrWhiteSpace(autoMiraclePresets.Value))
-                    autoMiraclePresets.Value = "miracle:Hunter";
-                autoMiracleDefaultsInitialized.Value = true;
-                Config.Save();
-            }
-            autoFloorPresets = Config.Bind(
-                "Autopilot",
-                "FloorPresets",
-                "floor:Miracle,floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP",
-                "Ordered next-floor event types preferred by autopilot. Configure this from the F8 menu.");
-            autoFloorDefaultsInitialized = Config.Bind(
-                "Autopilot",
-                "FloorDefaultsInitialized",
-                false,
-                "Internal migration marker for the default next-floor priority.");
-            const string previousFloorDefault = "floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP";
-            const string currentFloorDefault = "floor:Miracle,floor:Anvil,floor:InventoryStorage,floor:Charm,floor:EXP";
-            if (!autoFloorDefaultsInitialized.Value ||
-                string.Equals(autoFloorPresets.Value, previousFloorDefault, StringComparison.OrdinalIgnoreCase))
-            {
-                if (string.IsNullOrWhiteSpace(autoFloorPresets.Value))
-                    autoFloorPresets.Value = currentFloorDefault;
-                else if (string.Equals(autoFloorPresets.Value, previousFloorDefault,
-                             StringComparison.OrdinalIgnoreCase))
-                    autoFloorPresets.Value = currentFloorDefault;
-                autoFloorDefaultsInitialized.Value = true;
-                Config.Save();
-            }
-            autoArrangeInventory = Config.Bind(
-                "Autopilot",
-                "AutoArrangeInventory",
-                false,
-                "Automatically use the game's best charm-level inventory arranger while autopilot is enabled and out of combat.");
-            autoFullInventoryStrategy = Config.Bind(
-                "Autopilot",
-                "FullInventoryStrategy",
-                2,
-                new ConfigDescription(
-                    "0: never discard, 1: replace lower-rarity unfavorited Charms only, 2: also replace safe ordinary items.",
-                    new AcceptableValueRange<int>(0, 2)));
-            autoDefend = Config.Bind(
-                "Autopilot",
-                "AutoDefend",
-                true,
-                "Use supported vanilla weapon guard or parry inputs against predicted incoming attacks.");
-            autoAttackMode = Config.Bind(
-                "Autopilot",
-                "AttackMode",
-                0,
-                new ConfigDescription(
-                    "0: prefer left attack, 1: prefer right attack with left fallback, 2: left attack only, 3: right attack only.",
-                    new AcceptableValueRange<int>(0, 3)));
-            autoReviveWhenClear = Config.Bind(
+            reviveWhenClear = Config.Bind(
                 "Multiplayer",
                 "AutoReviveWhenClear",
                 false,
                 "Automatically revive all downed players at 50% HP after no living hostile enemies remain.");
+            directModeEnabled = Config.Bind(
+                "DirectConnect",
+                "Enabled",
+                false,
+                "Steam online only: use the IP transport after the next game restart. Offline environments enable it automatically.");
+            directPort = Config.Bind(
+                "DirectConnect",
+                "Port",
+                7777,
+                new ConfigDescription(
+                    "TCP port used by the IP transport after the next game restart.",
+                    new AcceptableValueRange<int>(1, 65535)));
+            CleanRemovedSettings();
             bossLifesteal = Config.Bind(
                 "Scaling",
                 "BossLifesteal",
@@ -269,6 +185,8 @@ namespace SephiriaTogether
         internal static float MaximumMultiplierValue => maximumMultiplier.Value;
         internal static float EnemyCountPerExtraPlayerValue => enemyCountPerExtraPlayer.Value;
         internal static float MaximumEnemyCountMultiplierValue => maximumEnemyCountMultiplier.Value;
+        internal static int PlayerCount => Math.Max(1,
+            PlayerSpawner.MultiplayerList?.Count(player => player?.PlayerAvatar != null) ?? 1);
         internal static void SetBaselinePlayers(int value) => scalingStartsAbove.Value = Mathf.Clamp(value, 0, 250);
         internal static void SetBaseEnemyMultiplier(float value) => baseEnemyMultiplier.Value = Mathf.Clamp(value, 0.05f, 4f);
         internal static void SetHealthPerExtraPlayer(float value) => healthPerExtraPlayer.Value = Mathf.Clamp(value, 0f, 5f);
@@ -284,6 +202,48 @@ namespace SephiriaTogether
 
         private static bool UsesUnmodifiedKey(KeyboardShortcut shortcut, KeyCode key) =>
             shortcut.MainKey == key && !shortcut.Modifiers.Any();
+
+        private static bool NoShortcutModifiersHeld()
+        {
+            return !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl) &&
+                   !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt) &&
+                   !Input.GetKey(KeyCode.LeftShift) && !Input.GetKey(KeyCode.RightShift) &&
+                   !Input.GetKey(KeyCode.LeftCommand) && !Input.GetKey(KeyCode.RightCommand) &&
+                   !Input.GetKey(KeyCode.LeftWindows) && !Input.GetKey(KeyCode.RightWindows);
+        }
+
+        private void CleanRemovedSettings()
+        {
+            bool saveOnSet = Config.SaveOnConfigSet;
+            Config.SaveOnConfigSet = false;
+            try
+            {
+                RemoveSetting("Interface", "AutoPilotShortcut", KeyboardShortcut.Empty);
+                RemoveSetting("Autopilot", "ChoiceStrategy", 0);
+                RemoveSetting("Autopilot", "ChoicePresets", "");
+                RemoveSetting("Autopilot", "WeaponPresets", "");
+                RemoveSetting("Autopilot", "MiraclePresets", "");
+                RemoveSetting("Autopilot", "MiracleDefaultsInitialized", false);
+                RemoveSetting("Autopilot", "FloorPresets", "");
+                RemoveSetting("Autopilot", "FloorDefaultsInitialized", false);
+                RemoveSetting("Autopilot", "AutoArrangeInventory", false);
+                RemoveSetting("Autopilot", "FullInventoryStrategy", 0);
+                RemoveSetting("Autopilot", "AutoDefend", false);
+                RemoveSetting("Autopilot", "AttackMode", 0);
+                Config.Save();
+            }
+            finally
+            {
+                Config.SaveOnConfigSet = saveOnSet;
+            }
+        }
+
+        private void RemoveSetting<T>(string section, string key, T defaultValue)
+        {
+            ConfigDefinition definition = new ConfigDefinition(section, key);
+            Config.Bind(definition, defaultValue);
+            Config.Remove(definition);
+        }
 
         internal static void ApplyPlayerLimit()
         {
@@ -304,52 +264,41 @@ namespace SephiriaTogether
         {
             CoopMenu.Close();
             CoopMenu.ResetClientCompensation();
+            LanRoomDiscovery.StopListening();
             harmony?.UnpatchSelf();
             MidRunJoin.ClearConnections();
             BreathingHealPatch.Clear();
             AutoRevivePatch.Clear();
             CatchUpRewards.ClearClientState();
             CatchUpRewards.ClearServerConnectionState();
-            CloneBotManager.Clear();
-            AutoPilot.Clear();
         }
 
         private void OnGUI()
         {
             RescueAlerts.Draw();
             VersionReminder.Draw();
-            AutoPilot.Draw();
             CoopMenu.Draw();
         }
 
         private void Update()
         {
             bool f8Held = UsesUnmodifiedKey(menuShortcut.Value, KeyCode.F8) &&
+                          NoShortcutModifiersHeld() &&
                           Keyboard.current != null && Keyboard.current.f8Key.isPressed;
-            bool f9Held = UsesUnmodifiedKey(autoPilotShortcut.Value, KeyCode.F9) &&
-                          Keyboard.current != null && Keyboard.current.f9Key.isPressed;
             bool fallbackF8Pressed = f8Held && !lastF8Held;
-            bool fallbackF9Pressed = f9Held && !lastF9Held;
             lastF8Held = f8Held;
-            lastF9Held = f9Held;
             bool menuPressed = menuShortcut.Value.IsDown() || fallbackF8Pressed;
-            bool autoPilotPressed = autoPilotShortcut.Value.IsDown() || fallbackF9Pressed;
             if (Time.unscaledTime >= nextShortcutToggle && !CoopMenu.IsCapturingShortcut && menuPressed)
             {
                 LogInfo($"Shortcut pressed: menu={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
                 CoopMenu.Toggle();
                 nextShortcutToggle = Time.unscaledTime + 0.35f;
             }
-            if (Time.unscaledTime >= nextShortcutToggle && !CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen && autoPilotPressed)
-            {
-                LogInfo($"Shortcut pressed: autoplay={autoPilotShortcut.Value}.");
-                AutoPilot.Toggle();
-                nextShortcutToggle = Time.unscaledTime + 0.35f;
-            }
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
             MoneyTransfer.Tick();
             StartProgressSelection.Tick();
+            LanRoomDiscovery.Tick();
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)
@@ -377,7 +326,7 @@ namespace SephiriaTogether
                 yield break;
             }
 
-            int playerCount = CountActivePlayers();
+            int playerCount = PlayerCount;
             int extraPlayers = Math.Max(0, playerCount - Math.Max(0, scalingStartsAbove.Value));
             float multiplier = Math.Max(0.05f, baseEnemyMultiplier.Value) *
                                (1f + Math.Max(0f, healthPerExtraPlayer.Value) * extraPlayers);
@@ -426,24 +375,6 @@ namespace SephiriaTogether
             return false;
         }
 
-        private static int CountActivePlayers()
-        {
-            int count = 0;
-            if (PlayerSpawner.MultiplayerList != null)
-            {
-                foreach (PlayerSpawner playerSpawner in PlayerSpawner.MultiplayerList)
-                {
-                    if (playerSpawner != null && playerSpawner.PlayerAvatar != null &&
-                        !CloneBotManager.IsBot(playerSpawner))
-                    {
-                        count++;
-                    }
-                }
-            }
-
-            return count;
-        }
-
         private static bool IsFinite(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);
@@ -456,6 +387,7 @@ namespace SephiriaTogether
         private void OnEnable()
         {
             Instance = this;
+            LanRoomDiscovery.StartListening();
         }
 
         private void OnDisable()

@@ -74,7 +74,7 @@ namespace SephiriaTogether
         internal static List<PlayerSpawner> GetCandidates()
         {
             return (PlayerSpawner.MultiplayerList ?? new List<PlayerSpawner>())
-                .Where(player => player != null && !CloneBotManager.IsBot(player) &&
+                .Where(player => player != null &&
                                  player.PlayerAvatar != null && player.PlayerAvatar.localDataStorage != null)
                 .OrderBy(Progress)
                 .ThenBy(Chapter)
