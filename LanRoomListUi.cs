@@ -9,6 +9,8 @@ namespace SephiriaTogether
     {
         internal string Address;
         internal ushort Port;
+        internal string GameVersion;
+        internal string ModVersion;
     }
 
     internal static class LanRoomListUi
@@ -19,14 +21,40 @@ namespace SephiriaTogether
         {
             activePanel = panel;
             Clear(panel);
-            if (panel != null && panel.searchLobbyGroup.activeSelf) LanRoomDiscovery.Refresh();
+        }
+
+        internal static void ActivateIpMode(UI_MultiplayerPanel panel)
+        {
+            activePanel = panel;
+            if (panel == null) return;
+            if (panel.lobbyElements != null)
+            {
+                foreach (UI_MultiplayerLobbyElement element in panel.lobbyElements.ToArray())
+                    if (element != null) UnityEngine.Object.Destroy(element.gameObject);
+                panel.lobbyElements.Clear();
+            }
+            Clear(panel);
+        }
+
+        internal static void DeactivateIpMode(UI_MultiplayerPanel panel)
+        {
+            if (panel == null) return;
+            if (panel.lobbyElements != null)
+            {
+                foreach (UI_MultiplayerLobbyElement element in panel.lobbyElements.ToArray())
+                    if (element != null) UnityEngine.Object.Destroy(element.gameObject);
+                panel.lobbyElements.Clear();
+            }
+            Clear(panel);
+            activePanel = null;
         }
 
         internal static void Close() => activePanel = null;
 
         internal static void NotifyRoomsChanged()
         {
-            if (activePanel == null) return;
+            if (activePanel == null || !IpTransport.IsActive || activePanel.lobbyListZone == null ||
+                activePanel.searchLobbyGroup == null || !activePanel.searchLobbyGroup.activeSelf) return;
             Clear(activePanel);
             foreach (LanRoomDiscovery.Room room in LanRoomDiscovery.Snapshot()
                          .OrderBy(candidate => candidate.Name).ThenBy(candidate => candidate.Address))
@@ -36,6 +64,8 @@ namespace SephiriaTogether
                 LanRoomElement tag = element.gameObject.AddComponent<LanRoomElement>();
                 tag.Address = room.Address;
                 tag.Port = room.Port;
+                tag.GameVersion = room.GameVersion;
+                tag.ModVersion = room.ModVersion;
                 if (element.lobbyNameText != null) element.lobbyNameText.text = room.Name;
                 if (element.lobbyMemberText != null)
                     element.lobbyMemberText.text = room.Players + " / " + room.MaxPlayers;
@@ -67,12 +97,6 @@ namespace SephiriaTogether
         private static void Postfix() => LanRoomListUi.Close();
     }
 
-    [HarmonyPatch(typeof(UI_MultiplayerPanel), nameof(UI_MultiplayerPanel.RefreshLobbyList))]
-    internal static class LanRoomRefreshPatch
-    {
-        private static void Postfix() => LanRoomDiscovery.Refresh();
-    }
-
     [HarmonyPatch(typeof(UI_MultiplayerLobbyElement), nameof(UI_MultiplayerLobbyElement.OnClick))]
     internal static class LanRoomElementClickPatch
     {
@@ -80,6 +104,7 @@ namespace SephiriaTogether
         {
             LanRoomElement room = __instance.GetComponent<LanRoomElement>();
             if (room == null) return true;
+            VersionCompatibility.WarnLanRoom(room.GameVersion, room.ModVersion, room.Address, room.Port);
             IpTransport.JoinRoom(room.Address, room.Port);
             return false;
         }

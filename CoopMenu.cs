@@ -171,6 +171,8 @@ namespace SephiriaTogether
                 BeginSection(MenuText.Get("LocalShortcuts"));
                 DrawLocalShortcutSettings();
                 EndSection();
+                if (IpTransport.CanChangeSettings)
+                    DrawDirectConnectControls();
                 BeginSection(MenuText.Get("Multiplayer"));
                 if (JoinProgressBypass.CanCreateLobbyForCurrentRun())
                 {
@@ -210,13 +212,39 @@ namespace SephiriaTogether
                 GUILayout.Label(MenuText.Get("AutoReviveWhenClearHelp"), muted);
                 DrawToggle(MenuText.Get("FriendlyFire"), Plugin.friendlyFire);
                 GUILayout.Label(MenuText.Get("FriendlyFireHelp"), muted);
-                GUILayout.Space(8f);
-                DrawToggle(MenuText.Get("Catchup"), Plugin.catchUpExperienceRatio.Value > 0.5f,
-                    () => Plugin.catchUpExperienceRatio.Value = Plugin.catchUpExperienceRatio.Value > 0.5f ? 0f : 1f);
                 EndSection();
+
+                if (!IpTransport.CanChangeSettings)
+                    DrawDirectConnectControls();
 
                 BeginSection(MenuText.Get("StartProgress"));
                 GUILayout.Label(MenuText.Get("StartProgressHelp"), muted);
+                GUILayout.Label(MenuText.Get("StartProgressManual"), section);
+                List<RaceEntity> manualOptions = StartProgressSelection.GetManualOptions();
+                List<string> manualLabels = new List<string> { MenuText.Get("StartProgressManualUsePlayer") };
+                manualLabels.AddRange(manualOptions.Select(StartProgressSelection.DescribeManual));
+                int manualSelection = StartProgressSelection.SelectedManualRaceId == int.MinValue
+                    ? 0 : Math.Max(0, manualOptions.FindIndex(race => race.id == StartProgressSelection.SelectedManualRaceId) + 1);
+                string manualLabel = manualSelection == 0
+                    ? StartProgressSelection.HasSelectedPlayer
+                        ? MenuText.Get("StartProgressManualUsePlayer")
+                        : MenuText.Get("StartProgressManualNone")
+                    : manualLabels[manualSelection];
+                GUI.enabled = StartProgressSelection.CanSelect;
+                if (GUILayout.Button(manualLabel, button, GUILayout.Height(IsNarrow ? 42f : 32f)))
+                {
+                    UI_MessageBox_List list = UIManager.Instance?.GetElement<UI_MessageBox_List>();
+                    if (list != null)
+                    {
+                        list.Open(MenuText.Get("StartProgressManual"), index =>
+                        {
+                            if (index <= 0) StartProgressSelection.ClearManualSelection();
+                            else if (index - 1 < manualOptions.Count)
+                                StartProgressSelection.SelectManual(manualOptions[index - 1].id);
+                        }, manualLabels);
+                    }
+                }
+                GUI.enabled = true;
                 List<PlayerSpawner> progressPlayers = StartProgressSelection.GetCandidates();
                 if (progressPlayers.Count == 0)
                 {
@@ -697,7 +725,8 @@ namespace SephiriaTogether
                 BeginSection(MenuText.Get("LocalShortcuts"));
                 DrawLocalShortcutSettings();
                 EndSection();
-                DrawDirectConnectControls();
+                if (IpTransport.CanChangeSettings)
+                    DrawDirectConnectControls();
             }
             BeginSection(heading);
             GUILayout.Label(string.IsNullOrEmpty(content) ? MenuText.Get("NoData") : content, body);
@@ -711,19 +740,49 @@ namespace SephiriaTogether
         private static void DrawDirectConnectControls()
         {
             if (string.IsNullOrEmpty(directPortText)) directPortText = IpTransport.ConfiguredPort.ToString();
+            string status = IpTransport.IsActive ? MenuText.Get("IpActiveShort") :
+                Plugin.directModeEnabled != null && Plugin.directModeEnabled.Value
+                    ? MenuText.Get("IpPendingShort") : MenuText.Get("IpOffShort");
             BeginSection(MenuText.Get("DirectConnect"));
+            GUILayout.BeginHorizontal();
+            GUILayout.Label(status, muted);
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
             GUILayout.Label(MenuText.Get("DirectConnectHelp"), muted);
             if (IpTransport.IsOfflineEnvironment)
+            {
+                GUI.enabled = false;
                 GUILayout.Label(MenuText.Get("IpOfflineAutomatic"), body);
+                GUI.enabled = true;
+            }
             else
-                DrawToggle(MenuText.Get("DirectMode"), Plugin.directModeEnabled);
+            {
+                GUI.enabled = IpTransport.CanChangeSettings;
+                DrawToggle(MenuText.Get("DirectMode"), Plugin.directModeEnabled.Value,
+                    () =>
+                    {
+                        Plugin.directModeEnabled.Value = !Plugin.directModeEnabled.Value;
+                        Plugin.SaveSettings();
+                        IpTransport.ApplySettingsFromMenu();
+                    });
+                GUI.enabled = true;
+            }
             GUILayout.Label(MenuText.Get("DirectPort"), body);
+            GUI.enabled = IpTransport.CanChangeSettings;
             directPortText = GUILayout.TextField(directPortText ?? "", input, GUILayout.Height(30f));
             if (int.TryParse(directPortText, out int parsedPort) && parsedPort >= 1 && parsedPort <= 65535)
             {
-                Plugin.directPort.Value = parsedPort;
+                if (Plugin.directPort.Value != parsedPort)
+                {
+                    Plugin.directPort.Value = parsedPort;
+                    Plugin.SaveSettings();
+                    IpTransport.ApplySettingsFromMenu();
+                }
             }
-            GUILayout.Label(MenuText.Get(IpTransport.IsActive ? "IpTransportActive" : "IpRestartRequired"), muted);
+            GUI.enabled = true;
+            if (!IpTransport.CanChangeSettings)
+                GUILayout.Label(MenuText.Get("IpLockedInSession"), muted);
+            GUILayout.Label(MenuText.Get("IpRestartNotice"), muted);
             EndSection();
         }
 

@@ -1,6 +1,6 @@
 # Sephiria Together
 
-A multiplayer framework for Sephiria 1.0.29. It provides Steam lobbies, TCP/IP rooms for offline environments, configurable capacity, mid-run joining, GUID reconnect, progress-gate bypass, catch-up rewards, and enemy scaling.
+A multiplayer framework for Sephiria. It provides Steam lobbies, TCP/IP rooms for offline environments, configurable capacity, mid-run joining, GUID reconnect, progress-gate bypass, catch-up rewards, and enemy scaling.
 
 The F8 menu follows the game's active language for Simplified Chinese, Traditional Chinese, English, Korean and Japanese. Other languages fall back to English.
 
@@ -46,7 +46,7 @@ If BepInEx 5 is already installed:
 
 See `INSTALL.md` for bilingual beginner instructions.
 
-The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients; clients that need custom compensation, transfers, progress selection, rescue requests, or IP/LAN rooms must install the matching plugin version.
+The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients; clients that need custom compensation, transfers, progress selection, rescue requests, or IP/LAN rooms should install the plugin. Game and Mod version differences no longer block joining; a temporary warning is shown for 20 seconds and then disappears.
 
 The optional delayed healing is host-authoritative. Players do not heal for 10 seconds after taking damage, then recover at a fixed 1 HP/s, including during combat. It uses the game's normal HP synchronization, so clients do not need the plugin.
 
@@ -68,11 +68,13 @@ Modded clients show a prominent banner when a teammate's synchronized `IsDead` s
 
 The optional `Multiplayer/AutoReviveWhenClear` setting is host-authoritative and works for unmodded clients. When no living hostile non-dummy units remain and surviving players are out of combat for two seconds, all downed players revive at 50% max HP. If the final player falls after the room is already clear, the same enemy check runs before vanilla game over and revives the party immediately; active enemies always preserve the original game-over behavior.
 
+Before a run enters the dungeon, the host can rebuild its starting progress from an online player's validated story progress or choose a specific normal story chapter from the manual dropdown. Internal transition, side-story, test, and multiplayer-blocked races are excluded. This changes only the current run's starting chapter and does not edit personal saves. If an older client cannot send the Mod progress report, the host falls back to its synchronized main-quest progress; late progress without current quest-node data uses the corresponding normal chapter start.
+
 The F8 Saves page can create a manual snapshot of the selected profile and its current-run TMP data. These snapshots are stored under `Documents/Saved Games/Sephiria/SephiriaTogetherBackups`, outside the filename pattern used by the game's rotating backups, so the game does not delete older mod snapshots. The save currently in use, automatic game backups, and manual backups created by this Mod can be activated from the same page. Activation requires confirmation, safely leaves the current session, waits for asynchronous saving to finish, creates a pre-restore snapshot, atomically replaces the selected slot, and reloads it from the title scene.
 
 ## IP and LAN rooms
 
-The IP transport is selected once when the game starts. If Steam is not logged in, TCP/IP is enabled automatically. Steam users can enable `DirectConnect/Enabled` and restart the game to use IP rooms instead of the Steam transport. The default TCP game port is `7777`.
+The IP transport is installed before the first network session. If Steam is not logged in, TCP/IP is enabled automatically. Steam users can enable `DirectConnect/Enabled` in the F8 menu or config; changes apply before a room starts, while an active room or game session cannot hot-switch transport. The default TCP game port is `7777`.
 
 After selecting a save, open the game's original multiplayer panel:
 
@@ -80,9 +82,9 @@ After selecting a save, open the game's original multiplayer panel:
 2. A client can press **Refresh**. The Mod sends an on-demand discovery query to broadcast addresses and up to two same-subnet `/24` ranges. Confirmed IP rooms appear in the original room list as `LAN` entries.
 3. A client can also press the original **Join** button and enter `IP` or `IP:port` manually.
 
-Discovery uses UDP `7780`; gameplay uses the configured TCP port. Allow both through the firewall. Automatic discovery requires a LAN or virtual network that permits peer-to-peer traffic. Route-only game accelerators may not expose peers to one another, so manual IP joining remains available.
+Discovery uses UDP `7780`; gameplay uses the configured TCP port. Allow both through the firewall. The current client sends both the current discovery query and a `3.7.0` compatibility query, so rooms hosted by the previous Mod release can still appear. Automatic discovery requires a LAN or virtual network that permits peer-to-peer traffic. Route-only game accelerators may not expose peers to one another, so manual IP joining remains available.
 
-Both sides must use the same Sephiria game version and Sephiria Together version for IP rooms. IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player lists without requiring Steam lobby identities.
+IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player lists without requiring Steam lobby identities. Different game or Mod versions can connect when the host has the compatibility patch. A `3.7.0` host can be discovered by a `3.8.0` client after the compatibility query. For a manually entered or legacy-discovered `1.0.29` host, a `1.0.30` client retries the native authentication once with the host's game version; the old host still cannot provide newer custom protocol features.
 
 ## Configuration
 
@@ -92,12 +94,11 @@ Both sides must use the same Sephiria game version and Sephiria Together version
 - `MaximumExtraMultiplier`: cap on this plugin's multiplier. Default: `8`. Use `0` for no cap.
 - `AllowLowerProgressPlayers`: publish the host lobby as unrestricted by chapter and bypass the local chapter gate when joining. Default: `true`.
 - `AllowMidRunJoin`: keep the Steam lobby open and accept fresh players after a dungeon run starts. On the host, it also enables the server's GUID-based reconnect path without requiring `-allow_rejoin`. Fresh joining clients do not need the plugin; clients that need the game's automatic reconnect UI should also install it or launch with `-allow_rejoin`. Default: `true`.
-- `CatchUpExperienceRatio`: fresh mid-run players receive enough experience to reach this fraction of the other same-floor players' median cumulative experience. Default: `1` (100%). Use `0` to disable compensation.
 - `ScaleEnemyCount`: increase enemy count for procedural multiplayer waves. Default: `true`.
 - `EnemyCountPerExtraPlayer`: extra procedural-wave enemies per player above the baseline. Default: `0.08` (8%).
 - `MaximumEnemyCountMultiplier`: cap for the additional procedural-wave count multiplier. Default: `3`.
-- `DirectConnect/Enabled`: Steam online only. Select the TCP/IP transport on the next game restart. Offline environments enable it automatically. Default: `false`.
-- `DirectConnect/Port`: TCP game port used after restart. Default: `7777`. LAN discovery uses UDP `7780`.
+- `DirectConnect/Enabled`: enable TCP/IP rooms while no network session is active. Offline environments enable IP automatically. Default: `false`.
+- `DirectConnect/Port`: TCP game port. It can be changed before a session starts; an active session keeps its current transport and port. Default: `7777`. LAN discovery uses UDP `7780`.
 
 `PlayerLimit` is applied when creating the next host/Lobby. Do not rely on changing it after a server is already listening. The F8 menu is host-only for gameplay settings; clients can install the plugin for reconnect UI compatibility but cannot configure the host.
 
@@ -109,7 +110,7 @@ Configuration changes take effect for newly spawned enemies. Restart the run aft
 
 When the host has this option enabled, players who have already unlocked multiplayer but have lower quest progress can use the Steam lobby list, room code or Steam invitation without installing the plugin themselves. The host publishes only the lobby's admission chapter as `0`; this plugin does not directly modify save data or quest progress.
 
-The plugin keeps the version check and race-specific multiplayer block. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
+The plugin records version differences for diagnostics but does not block them. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
 
 Fresh mid-run players follow the game's existing floor join behavior: normally they enter at the host floor's spawn point; during a boss fight the game places them near the host. EXP catch-up uses the normal `AddExp` path, so level-up Sephirite choices, level-derived inventory expansion and other level-up effects are generated exactly as they are for earned experience. Catch-up never selects a weapon build path for a player; selectable rewards are retained in the host entitlement ledger for the client menu.
 
@@ -133,16 +134,16 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
- .\scripts\package.ps1 -Version 3.7.0
+ .\scripts\package.ps1 -Version 3.8.0
 ```
 
 This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.
 
 ## Compatibility
 
-- Built for Sephiria 1.0.29, Unity Mono, Windows x64.
+- Built and tested against Sephiria 1.0.30, Unity Mono, Windows x64.
 - Requires BepInEx 5.
-- Supports the Steam build and the tested offline build when both expose the same Sephiria 1.0.29 networking API.
+- Supports the Steam build and tested offline builds that expose compatible networking APIs; version admission is non-blocking, but changed game internals can still make a pairing unusable.
 - Game updates can change internal methods and require a rebuild.
 
 ## License

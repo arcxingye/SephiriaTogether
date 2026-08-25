@@ -9,16 +9,43 @@ namespace SephiriaTogether
     internal static class IpLobby
     {
         private static bool created;
+        private static bool joined;
+        private static string joinedAddress;
+        private static ushort joinedPort;
+        internal static bool IpServerStarted;
         private static string roomName = "IP Room";
         private static int maxPlayers = 4;
 
         internal static bool IsCreated => created && IpTransport.IsActive && NetworkServer.active;
+        internal static bool IsJoined => joined && IpTransport.IsActive && NetworkClient.active && !NetworkServer.active;
         internal static string RoomName => roomName;
         internal static int MaxPlayers => maxPlayers;
 
+        internal static void MarkJoined(string address, ushort port)
+        {
+            joined = true;
+            joinedAddress = address;
+            joinedPort = port;
+            UI_MultiplayerPanel panel = UIManager.Instance?.GetElement<UI_MultiplayerPanel>();
+            if (panel != null) ApplyPanelState(panel);
+            Plugin.LogInfo($"IP join started: address={address}, port={port}.");
+        }
+
         internal static void ConfirmCreate(UI_MultiplayerPanel panel)
         {
-            if (panel == null || !IpTransport.IsActive || !NetworkServer.active)
+            if (panel == null || !IpTransport.IsActive)
+            {
+                UIManager.Instance?.GetElement<UI_SystemMessage>()?.Open(MenuText.Get("IpRestartRequired"), 4f);
+                return;
+            }
+
+            if (!NetworkServer.active)
+            {
+                UIManager.Instance?.GetElement<UI_SystemMessage>()?.Open(MenuText.Get("IpCreateUnavailable"), 4f);
+                return;
+            }
+
+            if (!(NetworkManager.singleton?.transport is TelepathyTransport))
             {
                 UIManager.Instance?.GetElement<UI_SystemMessage>()?.Open(MenuText.Get("IpRestartRequired"), 4f);
                 return;
@@ -33,6 +60,9 @@ namespace SephiriaTogether
             }
             roomName = requestedName;
             maxPlayers = panel.memberBox != null ? panel.memberBox.CurrentSelection + 2 : PlayerLimit.CurrentLimit;
+            maxPlayers = Mathf.Clamp(maxPlayers, 2, PlayerLimit.CurrentLimit);
+            NetworkManager.singleton.maxConnections = maxPlayers;
+            NetworkServer.maxConnections = maxPlayers;
             created = true;
             HorayNetworkAuthenticator.allowConnection = true;
             if (DungeonManager.Instance != null)
@@ -41,7 +71,7 @@ namespace SephiriaTogether
                 DungeonManager.Instance.NetworklobbyCreatedSteamId = 0;
             }
 
-            ShowEnteredRoom(panel, roomName, "IP:" + IpTransport.ConfiguredPort);
+            ShowEnteredRoom(panel, roomName, "IP:" + IpTransport.ActivePort);
 
             PlayerAvatar player = Traverse.Create(panel).Field("playerAvatar").GetValue<PlayerAvatar>();
             FloorData lobbyFloor = DungeonManager.Instance?.FindFloorByName("MultiZone");
@@ -52,8 +82,8 @@ namespace SephiriaTogether
                     recordHistory: false, allowSave: false, keepPrevFloor: false, randomPosition: true);
             }
             UIManager.Instance?.GetElement<UI_SystemMessage>()?.Open(
-                string.Format(MenuText.Get("IpHostReady"), IpTransport.ConfiguredPort), 4f);
-            Plugin.LogInfo($"IP lobby created: name={roomName}, port={IpTransport.ConfiguredPort}, max={maxPlayers}.");
+                string.Format(MenuText.Get("IpHostReady"), IpTransport.ActivePort), 4f);
+            Plugin.LogInfo($"IP lobby created: name={roomName}, port={IpTransport.ActivePort}, max={maxPlayers}.");
         }
 
         internal static void Leave(UI_MultiplayerPanel panel)
@@ -69,6 +99,9 @@ namespace SephiriaTogether
         internal static void Reset()
         {
             created = false;
+            joined = false;
+            joinedAddress = null;
+            joinedPort = 0;
             roomName = "IP Room";
             maxPlayers = 4;
         }
@@ -78,20 +111,22 @@ namespace SephiriaTogether
             if (panel == null || !IpTransport.IsActive) return;
             if (IsCreated)
             {
-                ShowEnteredRoom(panel, roomName, "IP:" + IpTransport.ConfiguredPort);
+                ShowEnteredRoom(panel, roomName, "IP:" + IpTransport.ActivePort);
             }
-            else if (NetworkClient.active && !NetworkServer.active)
+            else if (IsJoined)
             {
-                string address = NetworkManager.singleton != null ? NetworkManager.singleton.networkAddress : "IP";
-                ShowEnteredRoom(panel, MenuText.Get("IpJoinedRoom"), address + ":" + IpTransport.ConfiguredPort);
+                string address = string.IsNullOrWhiteSpace(joinedAddress)
+                    ? NetworkManager.singleton != null ? NetworkManager.singleton.networkAddress : "IP"
+                    : joinedAddress;
+                ShowEnteredRoom(panel, MenuText.Get("IpJoinedRoom"), address + ":" + joinedPort);
             }
         }
 
         private static void ShowEnteredRoom(UI_MultiplayerPanel panel, string name, string code)
         {
-            panel.searchLobbyGroup.SetActive(false);
-            panel.createLobbyGroup.SetActive(false);
-            panel.enteredLobbyGroup.SetActive(true);
+            if (panel.searchLobbyGroup != null) panel.searchLobbyGroup.SetActive(false);
+            if (panel.createLobbyGroup != null) panel.createLobbyGroup.SetActive(false);
+            if (panel.enteredLobbyGroup != null) panel.enteredLobbyGroup.SetActive(true);
             if (panel.rejoinGroup != null) panel.rejoinGroup.SetActive(false);
             if (panel.roomNameText != null) panel.roomNameText.text = name;
             Traverse.Create(panel).Field("roomCode").SetValue(code);
@@ -115,15 +150,17 @@ namespace SephiriaTogether
                     recordHistory: false, allowSave: false, keepPrevFloor: false, randomPosition: true);
             }
             Reset();
+            VersionReminder.Clear();
+            NetworkServer.maxConnections = PlayerLimit.CurrentLimit;
             HorayNetworkAuthenticator.allowConnection = false;
             if (DungeonManager.Instance != null)
             {
                 DungeonManager.Instance.NetworklobbyCreatedPhase = 0;
                 DungeonManager.Instance.NetworklobbyCreatedSteamId = 0;
             }
-            panel.searchLobbyGroup.SetActive(true);
-            panel.createLobbyGroup.SetActive(false);
-            panel.enteredLobbyGroup.SetActive(false);
+            if (panel.searchLobbyGroup != null) panel.searchLobbyGroup.SetActive(true);
+            if (panel.createLobbyGroup != null) panel.createLobbyGroup.SetActive(false);
+            if (panel.enteredLobbyGroup != null) panel.enteredLobbyGroup.SetActive(false);
             if (panel.rejoinGroup != null) panel.rejoinGroup.SetActive(false);
             Plugin.LogInfo("IP lobby closed by host.");
         }
@@ -134,7 +171,13 @@ namespace SephiriaTogether
     {
         private static bool Prefix(UI_MultiplayerPanel __instance)
         {
-            if (!IpTransport.IsActive) return true;
+            if (!IpTransport.ShouldUseIpForUi) return true;
+            IpTransport.EnsureInstalled();
+            if (!IpTransport.IsActive)
+            {
+                IpTransport.ShowMessage(MenuText.Get("IpRestartRequired"));
+                return false;
+            }
             UIManager.Instance.GetElement<UI_MessageBoxHolder>().OpenYesNo(
                 __instance.createLobbyMessageString.ToString(), () => IpLobby.ConfirmCreate(__instance), null);
             return false;
@@ -164,7 +207,9 @@ namespace SephiriaTogether
     {
         private static void Postfix()
         {
+            if (!IpLobby.IpServerStarted && !IpTransport.IsActive) return;
             IpLobby.Reset();
+            IpLobby.IpServerStarted = false;
             HorayNetworkAuthenticator.allowConnection = false;
         }
     }
@@ -175,8 +220,18 @@ namespace SephiriaTogether
         private static void Postfix()
         {
             if (!IpTransport.IsActive) return;
+            IpLobby.IpServerStarted = true;
             IpLobby.Reset();
             HorayNetworkAuthenticator.allowConnection = false;
+        }
+    }
+
+    [HarmonyPatch(typeof(HorayNetworkManager), nameof(HorayNetworkManager.OnStopClient))]
+    internal static class IpLobbyClientStopPatch
+    {
+        private static void Postfix()
+        {
+            if (!NetworkServer.active) IpLobby.Reset();
         }
     }
 }

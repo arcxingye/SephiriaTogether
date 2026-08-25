@@ -25,11 +25,17 @@ namespace SephiriaTogether
             internal int RaceId;
             internal int Chapter;
             internal int SubChapter;
+            internal bool Fallback;
         }
 
         private static readonly Dictionary<int, Report> Reports = new Dictionary<int, Report>();
+        private static readonly HashSet<int> ManualStoryRaceIds = new HashSet<int>
+        {
+            0, 6, 7, 9, 12, 13, 14, 18, 22, 25, 26, 28, 30
+        };
         private static string selectedPlayerGuid;
         private static int selectedConnectionId = int.MinValue;
+        private static int selectedManualRaceId = int.MinValue;
         private static string status;
         private static float nextReportAt;
 
@@ -38,7 +44,8 @@ namespace SephiriaTogether
             !DungeonManager.Instance.isRunStarted && SaveManager.CurrentRun != null &&
             !SaveManager.CurrentRun.GetBool("RunStarted", false);
         internal static bool CanApplySelected => CanSelect &&
-            IsUsableCandidate(GetCandidates().FirstOrDefault(IsSelected));
+            (selectedManualRaceId != int.MinValue && IsManualStoryRace(RaceDatabase.FindById(selectedManualRaceId)) ||
+             IsUsableCandidate(GetCandidates().FirstOrDefault(IsSelected)));
         internal static bool CanSelectPlayer(PlayerSpawner player) => CanSelect && IsUsableCandidate(player);
 
         internal static void RegisterServerMessages()
@@ -67,12 +74,12 @@ namespace SephiriaTogether
             PlayerLocalDataStorage storage = NetworkClient.localPlayer != null
                 ? NetworkClient.localPlayer.GetComponent<PlayerLocalDataStorage>()
                 : null;
-            if (storage != null && NetworkClient.active && NetworkClient.ready &&
-                CatchUpRewards.HostSupportsProtocol()) SendReport(storage);
+            if (storage != null && NetworkClient.active && NetworkClient.ready) SendReport(storage);
         }
 
         internal static List<PlayerSpawner> GetCandidates()
         {
+            RefreshFallbackReports();
             return (PlayerSpawner.MultiplayerList ?? new List<PlayerSpawner>())
                 .Where(player => player != null &&
                                  player.PlayerAvatar != null && player.PlayerAvatar.localDataStorage != null)
@@ -85,18 +92,55 @@ namespace SephiriaTogether
         }
 
         internal static bool IsSelected(PlayerSpawner player) =>
-            player != null && !string.IsNullOrEmpty(selectedPlayerGuid) &&
+            selectedManualRaceId == int.MinValue && player != null && !string.IsNullOrEmpty(selectedPlayerGuid) &&
             string.Equals(selectedPlayerGuid, SelectionKey(player), StringComparison.Ordinal);
 
         internal static void Select(PlayerSpawner player)
         {
             if (!CanSelectPlayer(player) || !GetCandidates().Contains(player)) return;
+            selectedManualRaceId = int.MinValue;
             selectedPlayerGuid = SelectionKey(player);
             selectedConnectionId = player.connectionToClient?.connectionId ?? int.MinValue;
             status = string.Format(MenuText.Get("StartProgressSelected"), player.PlayerAvatar.Name,
                 Progress(player));
             Plugin.LogInfo($"Start progress selected: player={player.PlayerAvatar.Name}, progress={Progress(player)}, " +
                            $"race={RaceId(player)}, chapter={Chapter(player)}-{SubChapter(player)}.");
+        }
+
+        internal static int SelectedManualRaceId => selectedManualRaceId;
+        internal static bool HasSelectedPlayer => !string.IsNullOrEmpty(selectedPlayerGuid);
+
+        internal static List<RaceEntity> GetManualOptions()
+        {
+            try
+            {
+                return RaceDatabase.GetAll().Where(IsManualStoryRace)
+                    .OrderBy(race => race.actualChapterNum).ThenBy(race => race.id).ToList();
+            }
+            catch (Exception exception)
+            {
+                Plugin.LogInfo("Manual start progress options unavailable: " + exception.Message);
+                return new List<RaceEntity>();
+            }
+        }
+
+        internal static string DescribeManual(RaceEntity race) => race == null
+            ? MenuText.Get("StartProgressManualUnavailable")
+            : string.Format(MenuText.Get("StartProgressManualEntry"), race.actualChapterNum, race.name);
+
+        internal static void SelectManual(int raceId)
+        {
+            RaceEntity race = RaceDatabase.FindById(raceId);
+            if (!CanSelect || !IsManualStoryRace(race)) return;
+            selectedManualRaceId = raceId;
+            status = string.Format(MenuText.Get("StartProgressManualSelected"), race.actualChapterNum, race.name);
+            Plugin.LogInfo($"Manual start progress selected: race={raceId}, chapter={race.actualChapterNum}.");
+        }
+
+        internal static void ClearManualSelection()
+        {
+            selectedManualRaceId = int.MinValue;
+            status = null;
         }
 
         internal static string Describe(PlayerSpawner player)
@@ -122,10 +166,11 @@ namespace SephiriaTogether
                 return false;
             }
             PlayerSpawner player = GetCandidates().FirstOrDefault(IsSelected);
-            int raceId = RaceId(player);
+            int raceId = selectedManualRaceId != int.MinValue ? selectedManualRaceId : RaceId(player);
             RaceEntity race = RaceDatabase.FindById(raceId);
             HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
-            if (player == null || race == null || manager == null)
+            if ((selectedManualRaceId == int.MinValue && player == null) || race == null || manager == null ||
+                selectedManualRaceId != int.MinValue && !IsManualStoryRace(race))
             {
                 status = MenuText.Get("StartProgressUnavailable");
                 return false;
@@ -134,13 +179,15 @@ namespace SephiriaTogether
             if (SaveManager.CurrentRun.GetInt("CurrentGame", -1) == raceId &&
                 DungeonManager.Instance.raceId == raceId)
             {
-                status = string.Format(MenuText.Get("StartProgressAlreadyApplied"), player.PlayerAvatar.Name);
+                status = string.Format(MenuText.Get("StartProgressAlreadyApplied"),
+                    selectedManualRaceId != int.MinValue ? race.name : player.PlayerAvatar.Name);
                 return false;
             }
 
-            status = string.Format(MenuText.Get("StartProgressApplying"), player.PlayerAvatar.Name);
-            Plugin.LogInfo($"Applying selected start progress: player={player.PlayerAvatar.Name}, " +
-                           $"progress={Progress(player)}, race={raceId}, chapter={Chapter(player)}-{SubChapter(player)}.");
+            string source = selectedManualRaceId != int.MinValue ? race.name : player.PlayerAvatar.Name;
+            status = string.Format(MenuText.Get("StartProgressApplying"), source);
+            Plugin.LogInfo($"Applying selected start progress: source={source}, race={raceId}, " +
+                           $"chapter={race.actualChapterNum}.");
             manager.RestartGame(firstDeath: false, forceChapter: raceId);
             return true;
         }
@@ -162,6 +209,7 @@ namespace SephiriaTogether
             Reports.Clear();
             selectedPlayerGuid = null;
             selectedConnectionId = int.MinValue;
+            selectedManualRaceId = int.MinValue;
             status = null;
             nextReportAt = 0f;
         }
@@ -170,11 +218,10 @@ namespace SephiriaTogether
         {
             float deadline = Time.realtimeSinceStartup + 8f;
             while (storage != null && NetworkClient.active &&
-                   (!NetworkClient.ready || !CatchUpRewards.HostSupportsProtocol()) &&
+                   !NetworkClient.ready &&
                    Time.realtimeSinceStartup < deadline)
                 yield return null;
-            if (storage == null || !NetworkClient.active || !NetworkClient.ready ||
-                !CatchUpRewards.HostSupportsProtocol()) yield break;
+            if (storage == null || !NetworkClient.active || !NetworkClient.ready) yield break;
             SendReport(storage);
         }
 
@@ -203,25 +250,39 @@ namespace SephiriaTogether
                         .Select(node => node.nodeID).Take(32).ToArray()
                     : Array.Empty<string>()
             });
+            Plugin.LogInfo($"Start progress report sent: progress={progress}, race={raceId}, " +
+                           $"chapter={chapter}-{subChapter}, nodes={(progress >= 11 ? "current" : "0")}.");
         }
 
         private static void OnServerReport(NetworkConnectionToClient connection, StartProgressReportMessage message)
         {
-            if (connection == null || connection.identity == null || connection.identity.netId == 0) return;
+            if (connection == null || connection.identity == null || connection.identity.netId == 0)
+            {
+                Plugin.LogInfo("Start progress report rejected: missing authenticated player identity.");
+                return;
+            }
             RaceEntity race = RaceDatabase.FindById(message.raceId);
             PlayerLocalDataStorage storage = connection.identity.GetComponent<PlayerLocalDataStorage>();
+            bool crossVersion = VersionCompatibility.IsCrossVersionConnection(connection);
             if (!IsSelectableRace(race) || storage == null ||
                 race.mainQuestProgressRequired > message.progress || message.progress < 0 ||
                 message.progress > 11 || message.progress < 11 && message.chapter != race.actualChapterNum ||
                 message.progress < 11 && message.subChapter != 0 || message.subChapter < 0 ||
                 message.subChapter > 100 ||
-                !IsRaceConsistentWithProgress(message, race)) return;
+                !crossVersion && !IsRaceConsistentWithProgress(message, race))
+            {
+                Plugin.LogInfo($"Start progress report rejected: conn={connection.connectionId}, " +
+                               $"progress={message.progress}, race={message.raceId}, " +
+                               $"chapter={message.chapter}-{message.subChapter}, crossVersion={crossVersion}.");
+                return;
+            }
             Report report = new Report
             {
                 Progress = message.progress,
                 RaceId = message.raceId,
                 Chapter = Math.Max(0, message.chapter),
-                SubChapter = Math.Max(0, message.subChapter)
+                SubChapter = Math.Max(0, message.subChapter),
+                Fallback = false
             };
             if (Reports.TryGetValue(connection.connectionId, out Report existing) &&
                 existing.Progress == report.Progress && existing.RaceId == report.RaceId &&
@@ -293,6 +354,53 @@ namespace SephiriaTogether
 
         private static bool HasReport(PlayerSpawner player) => ReportFor(player) != null;
 
+        private static void RefreshFallbackReports()
+        {
+            if (!NetworkServer.active || PlayerSpawner.MultiplayerList == null) return;
+            foreach (PlayerSpawner player in PlayerSpawner.MultiplayerList)
+            {
+                NetworkConnectionToClient connection = player?.connectionToClient;
+                PlayerLocalDataStorage storage = player?.PlayerAvatar?.localDataStorage;
+                if (player == null || player.isHost || connection == null || storage == null)
+                    continue;
+
+                int connectionId = connection.connectionId;
+                if (Reports.TryGetValue(connectionId, out Report existing) && !existing.Fallback)
+                    continue;
+
+                int progress = Mathf.Clamp(storage.mainQuestProgress, 0, 11);
+                int raceId = FallbackRaceForProgress(progress);
+                RaceEntity race = RaceDatabase.FindById(raceId);
+                if (!IsSelectableRace(race)) continue;
+
+                Report fallback = new Report
+                {
+                    Progress = progress,
+                    RaceId = raceId,
+                    Chapter = race.actualChapterNum,
+                    SubChapter = 0,
+                    Fallback = true
+                };
+                if (existing != null && existing.Progress == fallback.Progress &&
+                    existing.RaceId == fallback.RaceId && existing.Chapter == fallback.Chapter &&
+                    existing.SubChapter == fallback.SubChapter) continue;
+                Reports[connectionId] = fallback;
+                Plugin.LogInfo($"Start progress fallback: player={player.PlayerAvatar?.Name}, " +
+                               $"conn={connectionId}, progress={progress}, race={raceId}, " +
+                               $"source=syncvar.");
+            }
+        }
+
+        private static int FallbackRaceForProgress(int progress)
+        {
+            if (progress <= 0) return 0;
+            if (progress == 1) return 6;
+            if (progress <= 3) return 9;
+            if (progress <= 5) return 13;
+            if (progress <= 10) return 12;
+            return 13;
+        }
+
         private static bool IsLocalPlayer(PlayerSpawner player) =>
             player != null && (player.isHost || player.connectionToClient == NetworkServer.localConnection);
 
@@ -342,6 +450,9 @@ namespace SephiriaTogether
 
         private static bool IsSelectableRace(RaceEntity race) => race != null && race.lobbyStage != null &&
             race.id >= 0 && race.id < 100 && !race.isMultiplayerBlocked;
+
+        private static bool IsManualStoryRace(RaceEntity race) => IsSelectableRace(race) &&
+            ManualStoryRaceIds.Contains(race.id);
 
         private static bool IsRaceConsistentWithProgress(StartProgressReportMessage message, RaceEntity race)
         {

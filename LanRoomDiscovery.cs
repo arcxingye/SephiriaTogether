@@ -15,6 +15,7 @@ namespace SephiriaTogether
         internal const ushort DiscoveryPort = 7780;
         private const string QueryMagic = "STQ";
         private const string ResponseMagic = "STR";
+        private const string LegacyDiscoveryVersion = "3.7.0";
         private const float RoomTimeout = 10f;
 
         internal sealed class Room
@@ -25,6 +26,9 @@ namespace SephiriaTogether
             internal int Players;
             internal int MaxPlayers;
             internal string Chapter;
+            internal string GameVersion;
+            internal string ModVersion;
+            internal bool HasGameVersion;
             internal float LastSeen;
         }
 
@@ -32,6 +36,8 @@ namespace SephiriaTogether
         {
             internal string Address;
             internal string Nonce;
+            internal string RequestedModVersion;
+            internal bool SupportsGameVersion;
         }
 
         private static readonly object Sync = new object();
@@ -96,7 +102,12 @@ namespace SephiriaTogether
                 foreach (Room room in PendingRooms)
                 {
                     room.LastSeen = Time.unscaledTime;
-                    Rooms[room.Address + ":" + room.Port] = room;
+                    string key = room.Address + ":" + room.Port;
+                    if (!Rooms.TryGetValue(key, out Room existing) || room.HasGameVersion ||
+                        !existing.HasGameVersion)
+                        Rooms[key] = room;
+                    else
+                        existing.LastSeen = room.LastSeen;
                     dirty = true;
                 }
                 PendingRooms.Clear();
@@ -144,18 +155,29 @@ namespace SephiriaTogether
         private static void ParsePacket(string text, string sourceAddress)
         {
             string[] parts = (text ?? "").Split('|');
-            if (parts.Length < 4 || parts[1] != Plugin.PluginVersion) return;
+            if (parts.Length < 4 || string.IsNullOrEmpty(parts[1])) return;
             if (parts[0] == QueryMagic)
             {
                 if (parts[3] == InstanceId) return;
-                lock (Sync) PendingQueries.Add(new Query { Address = sourceAddress, Nonce = parts[2] });
+                lock (Sync)
+                    PendingQueries.Add(new Query
+                    {
+                        Address = sourceAddress,
+                        Nonce = parts[2],
+                        RequestedModVersion = parts[1],
+                        SupportsGameVersion = parts.Length >= 5
+                    });
                 return;
             }
             if (parts[0] != ResponseMagic || parts.Length < 9 || parts[2] != activeNonce ||
                 parts[3] == InstanceId) return;
             if (!ushort.TryParse(parts[4], out ushort port) || port == 0 ||
                 !int.TryParse(parts[5], out int players) || !int.TryParse(parts[6], out int maxPlayers)) return;
-            string name = string.Join("|", parts, 8, parts.Length - 8).Trim();
+            bool hasGameVersion = parts.Length >= 10 &&
+                                  parts[8].StartsWith("G:", StringComparison.Ordinal) &&
+                                  Version.TryParse(parts[8].Substring(2), out _);
+            int nameIndex = hasGameVersion ? 9 : 8;
+            string name = string.Join("|", parts, nameIndex, parts.Length - nameIndex).Trim();
             if (name.Length == 0) name = "Host";
             lock (Sync)
                 PendingRooms.Add(new Room
@@ -165,6 +187,11 @@ namespace SephiriaTogether
                     Players = Math.Max(1, players),
                     MaxPlayers = Math.Max(2, maxPlayers),
                     Chapter = parts[7],
+                    GameVersion = hasGameVersion
+                        ? parts[8].StartsWith("G:", StringComparison.Ordinal) ? parts[8].Substring(2) : parts[8]
+                        : "",
+                    ModVersion = parts[1],
+                    HasGameVersion = hasGameVersion,
                     Name = name
                 });
         }
@@ -173,9 +200,15 @@ namespace SephiriaTogether
         {
             try
             {
-                string response = ResponseMagic + "|" + Plugin.PluginVersion + "|" + query.Nonce + "|" + InstanceId +
-                                  "|" + IpTransport.ConfiguredPort + "|" + Plugin.PlayerCount + "|" +
-                                  IpLobby.MaxPlayers + "|" + Chapter() + "|" + IpLobby.RoomName;
+                // A 3.7 client rejects a response whose version field is not
+                // exactly 3.7. Keep the legacy response shape for legacy
+                // queries, while modern queries receive the real host version.
+                string responseVersion = query.SupportsGameVersion ? Plugin.PluginVersion :
+                    query.RequestedModVersion ?? Plugin.PluginVersion;
+                string response = ResponseMagic + "|" + responseVersion + "|" + query.Nonce + "|" + InstanceId +
+                                  "|" + IpTransport.ActivePort + "|" + Plugin.PlayerCount + "|" +
+                                  IpLobby.MaxPlayers + "|" + Chapter() + "|" +
+                                  (query.SupportsGameVersion ? "G:" + Application.version + "|" : "") + IpLobby.RoomName;
                 byte[] data = Encoding.UTF8.GetBytes(response);
                 using (UdpClient sender = new UdpClient())
                     sender.Send(data, data.Length, new IPEndPoint(IPAddress.Parse(query.Address), DiscoveryPort));
@@ -190,20 +223,32 @@ namespace SephiriaTogether
         {
             try
             {
-                byte[] data = Encoding.UTF8.GetBytes(QueryMagic + "|" + Plugin.PluginVersion + "|" + nonce + "|" + InstanceId);
                 HashSet<string> targets = DiscoveryTargets();
                 using (UdpClient sender = new UdpClient())
                 {
                     sender.EnableBroadcast = true;
-                    foreach (string target in targets)
-                        sender.Send(data, data.Length, new IPEndPoint(IPAddress.Parse(target), DiscoveryPort));
+                    SendQueryVariant(sender, targets, Plugin.PluginVersion, nonce, includeGameVersion: true);
+                    if (!string.Equals(Plugin.PluginVersion, LegacyDiscoveryVersion,
+                        StringComparison.OrdinalIgnoreCase))
+                        SendQueryVariant(sender, targets, LegacyDiscoveryVersion, nonce,
+                            includeGameVersion: false);
                 }
-                Plugin.LogInfo("LAN room refresh sent to " + targets.Count + " target(s).");
+                Plugin.LogInfo("LAN room refresh sent to " + targets.Count + " target(s) with compatibility queries.");
             }
             catch (Exception exception)
             {
                 Plugin.LogInfo("LAN room refresh failed: " + exception.Message);
             }
+        }
+
+        private static void SendQueryVariant(UdpClient sender, HashSet<string> targets,
+            string requestedModVersion, string nonce, bool includeGameVersion)
+        {
+            string suffix = includeGameVersion ? "|" + Application.version : "";
+            byte[] data = Encoding.UTF8.GetBytes(QueryMagic + "|" + requestedModVersion + "|" + nonce +
+                                                 "|" + InstanceId + suffix);
+            foreach (string target in targets)
+                sender.Send(data, data.Length, new IPEndPoint(IPAddress.Parse(target), DiscoveryPort));
         }
 
         private static HashSet<string> DiscoveryTargets()

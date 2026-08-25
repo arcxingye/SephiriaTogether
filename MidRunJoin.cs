@@ -126,8 +126,7 @@ namespace SephiriaTogether
             {
                 HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
                 HashSet<int> approved = VersionApprovedConnectionsField?.GetValue(manager) as HashSet<int>;
-                if (message.version == Application.version &&
-                    approved != null && approved.Contains(connection.connectionId))
+                if (approved != null && approved.Contains(connection.connectionId))
                 {
                     FreshConnections.Add(connection);
                     FreshSessionConnectionIds.Add(connection.connectionId);
@@ -194,7 +193,7 @@ namespace SephiriaTogether
 
         private static void OnServerFreshPocketItems(NetworkConnectionToClient connection, FreshPocketItemsMessage message)
         {
-            if (connection == null) return;
+            if (connection == null || !VersionCompatibility.IsProtocolCompatibleConnection(connection)) return;
             FreshPocketItems[connection.connectionId] = (message.itemIds ?? Array.Empty<int>())
                 .Where(id => ItemDatabase.FindItemById(id) != null)
                 .ToArray();
@@ -343,7 +342,7 @@ namespace SephiriaTogether
 
             if (isFresh && peerExperience.Count > 0)
             {
-                int target = Mathf.FloorToInt(Median(peerExperience) * Plugin.catchUpExperienceRatio.Value);
+                int target = Median(peerExperience);
                 int amount = Math.Max(0, target - newcomer.currentExp);
                 if (amount > 0)
                 {

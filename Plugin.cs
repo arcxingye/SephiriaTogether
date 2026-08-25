@@ -16,7 +16,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.7.0";
+        public const string PluginVersion = "3.8.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> baseEnemyMultiplier;
@@ -27,7 +27,6 @@ namespace SephiriaTogether
         internal static ConfigEntry<bool> allowUngroupedStageTransition;
         internal static ConfigEntry<bool> breathingHeal;
         internal static ConfigEntry<bool> friendlyFire;
-        internal static ConfigEntry<float> catchUpExperienceRatio;
         internal static ConfigEntry<bool> scaleEnemyCount;
         internal static ConfigEntry<float> enemyCountPerExtraPlayer;
         internal static ConfigEntry<float> maximumEnemyCountMultiplier;
@@ -70,13 +69,13 @@ namespace SephiriaTogether
                 "DirectConnect",
                 "Enabled",
                 false,
-                "Steam online only: use the IP transport after the next game restart. Offline environments enable it automatically.");
+                "Use the TCP/IP transport before a network session starts. Offline environments enable it automatically.");
             directPort = Config.Bind(
-                "DirectConnect",
-                "Port",
-                7777,
+                    "DirectConnect",
+                    "Port",
+                    7777,
                 new ConfigDescription(
-                    "TCP port used by the IP transport after the next game restart.",
+                    "TCP port used by the IP transport before a network session starts.",
                     new AcceptableValueRange<int>(1, 65535)));
             CleanRemovedSettings();
             bossLifesteal = Config.Bind(
@@ -137,13 +136,6 @@ namespace SephiriaTogether
                 "FriendlyFire",
                 false,
                 "Allow player attacks to damage other players. Damage is reduced to 1%, with 1 minimum and 5 maximum per hit.");
-            catchUpExperienceRatio = Config.Bind(
-                "Multiplayer",
-                "CatchUpExperienceRatio",
-                1f,
-                new ConfigDescription(
-                    "Fresh mid-run players catch up to this fraction of the other players' median cumulative experience.",
-                    new AcceptableValueRange<float>(0f, 1f)));
             scaleEnemyCount = Config.Bind(
                 "Scaling",
                 "ScaleEnemyCount",
@@ -173,7 +165,7 @@ namespace SephiriaTogether
                 $"+{Math.Max(0f, healthPerExtraPlayer.Value) * 100f:0.##}% original health " +
                 $"per player above {Math.Max(0, scalingStartsAbove.Value)}. Host only.");
             Logger.LogInfo(
-                $"Mid-run join={allowMidRunJoin.Value}, catch-up EXP={catchUpExperienceRatio.Value:P0}, " +
+                $"Mid-run join={allowMidRunJoin.Value}, catch-up EXP=100%, " +
                 $"lower-progress join={allowLowerProgressPlayers.Value}.");
         }
 
@@ -216,6 +208,7 @@ namespace SephiriaTogether
                 RemoveSetting("Autopilot", "FullInventoryStrategy", 0);
                 RemoveSetting("Autopilot", "AutoDefend", false);
                 RemoveSetting("Autopilot", "AttackMode", 0);
+                RemoveSetting("Multiplayer", "CatchUpExperienceRatio", 1f);
                 Config.Save();
             }
             finally
@@ -256,6 +249,7 @@ namespace SephiriaTogether
             BreathingHealPatch.Clear();
             AutoRevivePatch.Clear();
             CatchUpRewards.ClearClientState();
+            VersionReminder.Clear();
             CatchUpRewards.ClearServerConnectionState();
         }
 
@@ -274,6 +268,7 @@ namespace SephiriaTogether
             MoneyTransfer.Tick();
             StartProgressSelection.Tick();
             LanRoomDiscovery.Tick();
+            IpTransport.EnsureInstalled();
         }
 
         private static void HandleMenuShortcutEvent()
@@ -393,6 +388,20 @@ namespace SephiriaTogether
         {
             Instance = this;
             LanRoomDiscovery.StartListening();
+            StartCoroutine(InstallIpTransportWhenReady());
+        }
+
+        private IEnumerator InstallIpTransportWhenReady()
+        {
+            for (int frame = 0; frame < 180; frame++)
+            {
+                if (NetworkManager.singleton is HorayNetworkManager manager)
+                {
+                    IpTransport.Install(manager);
+                    yield break;
+                }
+                yield return null;
+            }
         }
 
         private void OnDisable()

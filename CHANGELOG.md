@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.8.0
+
+- Allow different game and Sephiria Together versions to connect; show one non-blocking 20-second countdown warning per room instead of rejecting or permanently displaying the mismatch.
+- Extend the unstarted-run progress picker with a manual chapter dropdown while retaining player-derived progress selection.
+- Gate custom network messages on a confirmed matching Mod protocol so older or unmodded clients can still join without receiving incompatible feature messages.
+- Restrict manual starting choices to the normal story Race entries and exclude internal, side-story, test, and multiplayer-blocked entries.
+- Send a legacy `3.7.0` LAN discovery query alongside the current query so mixed-version rooms remain discoverable; retain the old host's native authentication limitation when the older Mod is hosting.
+- Retry one manual/legacy LAN authentication against a detected `1.0.29` host so the old server's native game-version check does not reject a `1.0.30` client before admission.
+- Keep the starting-progress picker usable with older clients that do not send the current progress report by deriving a validated fallback from the synchronized main-quest progress.
+- Keep the IP direct-connect controls visible in the in-game menu and show a disabled explanation when the player is already inside a game instead of hiding the feature.
+- Make mid-run experience compensation always use 100% median experience; remove its configuration switch and menu control.
+
 ## 3.7.0
 
 - Remove all automatic-play and Clone Bot code, UI, settings, patches, and network messages from Sephiria Together. Those features are no longer part of this plugin.

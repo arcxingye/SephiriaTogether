@@ -120,6 +120,7 @@ namespace SephiriaTogether
 
         private static void OnServerRequest(NetworkConnectionToClient connection, MoneyTransferRequest message)
         {
+            if (!VersionCompatibility.IsProtocolCompatibleConnection(connection)) return;
             PlayerSpawner senderSpawner = connection?.identity != null
                 ? connection.identity.GetComponent<PlayerSpawner>()
                 : null;
@@ -249,6 +250,7 @@ namespace SephiriaTogether
 
         private static void OnClientResult(MoneyTransferResult message)
         {
+            if (!VersionCompatibility.HostSupportsProtocolMetadata()) return;
             Plugin.LogInfo($"Leaf transfer result received: request={message.requestId}, result={message.result}, " +
                            $"incoming={message.incoming}, amount={message.amount}, balance={message.balance}, " +
                            $"other={SafeName(message.otherName)}.");

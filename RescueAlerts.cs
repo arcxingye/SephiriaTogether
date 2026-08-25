@@ -140,6 +140,7 @@ namespace SephiriaTogether
 
         private static void OnClientAlert(RescueAlertMessage message)
         {
+            if (!VersionCompatibility.HostSupportsProtocolMetadata()) return;
             Show(message.playerName, true);
             if (GameLogWriter.Instance != null)
                 GameLogWriter.Instance.WriteLog(string.Format(MenuText.Get("RescueRequested"), message.playerName), Color.red);

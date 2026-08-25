@@ -63,11 +63,6 @@ namespace SephiriaTogether
                 return true;
             }
 
-            if (Application.version != lobby.GameVersion)
-            {
-                return true;
-            }
-
             FieldInfo networkLobbyField = AccessTools.Field(typeof(UI_MultiplayerPanel), "networkLobby");
             FieldInfo enterHostRequestField = AccessTools.Field(typeof(UI_MultiplayerPanel), "enterHostRequest");
             LobbyManager networkLobby = networkLobbyField?.GetValue(__instance) as LobbyManager;

@@ -496,7 +496,7 @@ namespace SephiriaTogether
 
         internal static void ClaimWeapon(int weaponId)
         {
-            if (ClientWeaponCredits > 0 && !clientClaimPending)
+            if (HostSupportsProtocol() && ClientWeaponCredits > 0 && !clientClaimPending)
             {
                 clientClaimPending = true;
                 NetworkClient.Send(new CatchUpClaimMessage { rewardType = 1, choiceId = weaponId });
@@ -917,7 +917,7 @@ namespace SephiriaTogether
 
         internal static void ClaimEnchant(ItemPosition position)
         {
-            if (ClientEnchantCredits > 0 && !clientClaimPending)
+            if (HostSupportsProtocol() && ClientEnchantCredits > 0 && !clientClaimPending)
             {
                 clientClaimPending = true;
                 NetworkClient.Send(new CatchUpClaimMessage { rewardType = 2, x = position.x, y = position.y });
@@ -931,7 +931,7 @@ namespace SephiriaTogether
 
         private static void SendClaim(byte rewardType, string choice)
         {
-            if (!clientClaimPending && NetworkClient.active)
+            if (HostSupportsProtocol() && !clientClaimPending && NetworkClient.active)
             {
                 clientClaimPending = true;
                 NetworkClient.Send(new CatchUpClaimMessage { rewardType = rewardType, choiceKey = choice });
@@ -994,7 +994,6 @@ namespace SephiriaTogether
         {
             RescueAlerts.ClearClient();
             MoneyTransfer.ClearClient();
-            VersionReminder.Clear();
             clientHelloSent = false;
             clientClaimPending = false;
             ClientWeaponCredits = 0;
@@ -1070,6 +1069,12 @@ namespace SephiriaTogether
 
         private static void OnServerHello(NetworkConnectionToClient connection, CatchUpHelloMessage message)
         {
+            if (!VersionCompatibility.IsProtocolCompatibleConnection(connection))
+            {
+                Plugin.LogInfo($"Ignored catch-up handshake from incompatible connection " +
+                               $"{connection?.connectionId ?? -1}.");
+                return;
+            }
             PlayerSpawner spawner = connection.identity != null
                 ? connection.identity.GetComponent<PlayerSpawner>()
                 : null;
@@ -1191,6 +1196,7 @@ namespace SephiriaTogether
 
         private static void OnClientOffer(CatchUpOfferMessage message)
         {
+            if (!VersionCompatibility.HostSupportsProtocolMetadata()) return;
             ClientWeaponCredits = Math.Max(0, message.weaponCredits);
             ClientEnchantCredits = Math.Max(0, message.enchantCredits);
             ClientMiracleCredits = Math.Max(0, message.miracleCredits);
@@ -1649,10 +1655,7 @@ namespace SephiriaTogether
 
         internal static bool HostSupportsProtocol()
         {
-            if (IpTransport.IsActive) return true;
-            GameObject steamManager = SingletonObject.Find("SteamManager");
-            return steamManager != null && steamManager.TryGetComponent(out LobbyManager manager) &&
-                   manager.HasLobby && manager.Lobby["SephiriaTogether"] == Plugin.PluginVersion;
+            return VersionCompatibility.HostSupportsProtocolMetadata();
         }
 
         internal static bool IsModdedConnection(NetworkConnectionToClient connection) =>
@@ -1669,7 +1672,6 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("RuleFriendlyFire"), OnOff(Plugin.friendlyFire.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleHealing"), OnOff(Plugin.breathingHeal.Value)) + "\n" +
                     string.Format(MenuText.Get("RuleAutoRevive"), OnOff(Plugin.reviveWhenClear.Value)) + "\n" +
-                    string.Format(MenuText.Get("RuleExpCatchup"), Plugin.catchUpExperienceRatio.Value.ToString("P0")) + "\n" +
                     string.Format(MenuText.Get("RuleEnemyBase"), Plugin.BaseEnemyMultiplierValue.ToString("0.##") + "x") + "\n" +
                     string.Format(MenuText.Get("RuleEnemyHp"), Plugin.BaselinePlayersValue,
                        Plugin.HealthPerExtraPlayerValue.ToString("P0"), Plugin.MaximumMultiplierValue > 0f
