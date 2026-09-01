@@ -286,6 +286,8 @@ namespace SephiriaTogether
                 yield break;
             }
 
+            ApplyRunDifficulty(spawner);
+
             if (isFresh && spawner.PlayerAvatar.IsDead)
             {
                 spawner.PlayerAvatar.Revive(spawner.PlayerAvatar.MaxHp);
@@ -480,6 +482,73 @@ namespace SephiriaTogether
             foreach (NewItemOwnInstance item in inventory.inventoryMatrix.Values)
                 if (item != null && item.Entity != null && wanted.Contains(item.Entity.id)) count += Math.Max(1, (int)item.Quantity);
             return count;
+        }
+
+        private static void ApplyRunDifficulty(PlayerSpawner spawner)
+        {
+            if (!NetworkServer.active || spawner?.PlayerAvatar == null || DungeonManager.Instance == null)
+                return;
+
+            PlayerAvatar player = spawner.PlayerAvatar;
+            GridInventory inventory = player.Inventory;
+            if (inventory == null) return;
+
+            if (DungeonManager.Instance.hardModeEnvironment.TryGetValue("MINDBURDEN", out int burden) && burden > 0)
+            {
+                const int heavyHeartId = 1304;
+                if (!ContainsInventoryItem(inventory, heavyHeartId))
+                {
+                    ItemEntity heavyHeart = ItemDatabase.FindItemById(heavyHeartId);
+                    if (heavyHeart != null)
+                    {
+                        int instanceId = ItemDatabase.GenerateInstanceID(new System.Random());
+                        inventory.AddItems(new[] { new ItemMetadata(instanceId, heavyHeartId, 1) }, notification: false);
+                        if (ContainsInventoryItem(inventory, heavyHeartId))
+                        {
+                            DungeonManager.Instance.BoundOnServer(instanceId, spawner.currentPlayerIdx);
+                            DungeonManager.Instance.OwnRestrictionOnServer(instanceId, ERestrictedOwnType.StartingItem);
+                            Log?.LogInfo($"Applied hard-mode Heavy Heart to joining player: player={Describe(spawner)}, instance={instanceId}.");
+                        }
+                        else
+                        {
+                            Log?.LogWarning($"Could not apply hard-mode Heavy Heart because the inventory could not accept it: player={Describe(spawner)}.");
+                        }
+                    }
+                    else
+                    {
+                        Log?.LogWarning("Hard-mode Heavy Heart item 1304 was not found in the item database.");
+                    }
+                }
+            }
+
+            if (DungeonManager.Instance.hardModeEnvironment.TryGetValue("DECLINE", out int decline) && decline > 0)
+            {
+                StatusInstance existingPenalty = player.orphanedStatusInstancesServerside.FirstOrDefault(status =>
+                    status != null && status.ID == "HARDMODE_HEALING_PENALTY" && status.Value == decline);
+                if (existingPenalty != null) return;
+
+                foreach (StatusInstance status in player.orphanedStatusInstancesServerside.ToArray())
+                {
+                    if (status == null || status.ID != "HARDMODE_HEALING_PENALTY") continue;
+                    status.RemoveStatus();
+                    status.ClearTarget();
+                    player.orphanedStatusInstancesServerside.Remove(status);
+                }
+                StatusInstance penalty = StatusDatabase.CreateStatusEntity("HARDMODE_HEALING_PENALTY", decline);
+                if (penalty != null)
+                {
+                    player.AddOrphanedStatusInstance(penalty);
+                    Log?.LogInfo($"Applied hard-mode healing penalty to joining player: player={Describe(spawner)}, value={decline}.");
+                }
+            }
+        }
+
+        private static bool ContainsInventoryItem(GridInventory inventory, int entityId)
+        {
+            if (inventory == null) return false;
+            if (inventory.inventoryMatrix.Values.Any(item => item != null && item.EntityID == entityId)) return true;
+            if (inventory.subBagMatrix.Values.Any(item => item.entityID == entityId)) return true;
+            return inventory.temporaryInventory.Any(item => item.entityID == entityId);
         }
 
         private static Vector3 FindBossJoinPosition(PlayerSpawner newcomer, BossSpawner boss, Rect area)

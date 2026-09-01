@@ -236,7 +236,7 @@ namespace SephiriaTogether
             ConvertPendingFusions(newcomer, newcomer.PlayerAvatar.currentFloorGuid);
             Plugin.LogInfo($"Catch-up prepare: player={newcomer.PlayerAvatar.Name}, conn={newcomer.connectionToClient.connectionId}, " +
                            $"guid={ShortGuid(newcomer.playerGuid)}, floor={ShortGuid(newcomer.PlayerAvatar.currentFloorGuid)}, " +
-                           $"history={newcomer.PlayerAvatar.floorTravelHistory.Count}, pendingWeapon={credits.Weapons}, " +
+                           $"clientMod={credits.ClientMod}, history={newcomer.PlayerAvatar.floorTravelHistory.Count}, pendingWeapon={credits.Weapons}, " +
                            $"pendingAnvilFloors={credits.PendingAnvilFloors.Count}.");
 
             HashSet<string> counted = new HashSet<string>();
@@ -1100,7 +1100,7 @@ namespace SephiriaTogether
             if (player == null) return;
             bool claimed = false;
 
-            if (message.rewardType == 2 && credits.Enchants > 0 && player.Inventory != null)
+            if (message.rewardType == 2 && credits.Enchants > credits.PendingEnchants && player.Inventory != null)
             {
                 ItemPosition position = new ItemPosition(message.x, message.y);
                 NewItemOwnInstance item = player.Inventory.FindItem(position);
@@ -1111,30 +1111,15 @@ namespace SephiriaTogether
                     if (level < item.Charm.maxLevel)
                     {
                         player.Inventory.Enchant(position);
-                        credits.Enchants--;
-                        credits.EnchantClaimed++;
-                        AddHistory(credits, "Claimed enchant");
-                        claimed = true;
+                        int.TryParse(DungeonManager.Instance.GetGlobalItemStatValue(item.InstanceID, "Enchant"), out int applied);
+                        if (applied == level + 1)
+                        {
+                            credits.Enchants--;
+                            credits.EnchantClaimed++;
+                            AddHistory(credits, "Claimed enchant");
+                            claimed = true;
+                        }
                     }
-                }
-            }
-            else if (message.rewardType == 3 && credits.Miracles > 0)
-            {
-                Miracle miracle = MiracleDatabase.FindMiracle(message.choiceKey ?? "");
-                MiracleController controller = player.GetComponent<MiracleController>();
-                if (miracle != null && GetMiracleOptions(credits).Contains(miracle.id) && controller != null)
-                {
-                    int seed = HashCode(message.choiceKey, credits.MiracleClaimed);
-                    ItemMetadata[] items = miracle.GetItems(false, controller, seed);
-                    if (controller.miracles.Count > 0) controller.RemoveMiracle(0);
-                    controller.AddMiracle(miracle.id);
-                    if (items != null && player.Inventory != null)
-                        player.Inventory.AddItemsWithGenerateInstanceID(seed, items, true, true);
-                credits.Miracles--;
-                credits.MiracleClaimed++;
-                    if (credits.CapturedMiracles.Count > 0) credits.CapturedMiracles.Clear();
-                    AddHistory(credits, "Claimed Miracle: " + miracle.id);
-                    claimed = true;
                 }
             }
             else if (message.rewardType == 4 && credits.Tablets > credits.PendingTablets &&
@@ -1608,6 +1593,8 @@ namespace SephiriaTogether
         {
             PlayerAvatar avatar = player?.PlayerAvatar;
             HorayNetworkManager manager = NetworkManager.singleton as HorayNetworkManager;
+            // Catch-up objects are vanilla network objects. ClientMod only gates the
+            // custom F8 offer/claim messages and must not gate object delivery.
             return NetworkServer.active && avatar != null &&
                    player.connectionToClient != null && !avatar.IsDead &&
                    !player.isHost && player.connectionToClient != NetworkServer.localConnection &&
@@ -1670,8 +1657,10 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("RuleLowerProgress"), OnOff(Plugin.allowLowerProgressPlayers.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleUngrouped"), OnOff(Plugin.allowUngroupedStageTransition.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleFriendlyFire"), OnOff(Plugin.friendlyFire.Value)) + "\n" +
+                   string.Format(MenuText.Get("RuleAttackingMerchants"), OnOff(Plugin.allowAttackingMerchants.Value)) + "\n" +
                    string.Format(MenuText.Get("RuleHealing"), OnOff(Plugin.breathingHeal.Value)) + "\n" +
                     string.Format(MenuText.Get("RuleAutoRevive"), OnOff(Plugin.reviveWhenClear.Value)) + "\n" +
+                    string.Format(MenuText.Get("RuleAntiCheat"), OnOff(Plugin.antiCheat.Value)) + "\n" +
                     string.Format(MenuText.Get("RuleEnemyBase"), Plugin.BaseEnemyMultiplierValue.ToString("0.##") + "x") + "\n" +
                     string.Format(MenuText.Get("RuleEnemyHp"), Plugin.BaselinePlayersValue,
                        Plugin.HealthPerExtraPlayerValue.ToString("P0"), Plugin.MaximumMultiplierValue > 0f
@@ -1699,7 +1688,8 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("DiagnosticPlayer"), identity) + "\n" +
                    string.Format(MenuText.Get("DiagnosticFloor"), FloorDisplay.Format(floor)) + "\n" +
                     string.Format(MenuText.Get("DiagnosticPlayers"), Plugin.PlayerCount) + "\n" +
-                   BuildOriginalScalingSummary();
+                    string.Format(MenuText.Get("RuleAntiCheat"), OnOff(Plugin.antiCheat.Value)) + "\n" +
+                    BuildOriginalScalingSummary();
         }
 
         internal static string BuildOriginalScalingSummary()
@@ -1920,9 +1910,9 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(MiracleSelector2), "GenerateMiracles")]
     internal static class CatchUpMiracleCapturePatch
     {
-        private static void Postfix(NetworkIdentity identity, MiracleMetadata[] __result)
+        private static void Postfix(NetworkIdentity __0, MiracleMetadata[] __result)
         {
-            MiracleController controller = identity != null ? identity.GetComponent<MiracleController>() : null;
+            MiracleController controller = __0 != null ? __0.GetComponent<MiracleController>() : null;
             CatchUpRewards.CaptureMiracles(controller, __result);
         }
     }

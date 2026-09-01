@@ -13,6 +13,7 @@ namespace SephiriaTogether
     internal static class AnvilCompensation
     {
         private static readonly Dictionary<uint, PlayerSpawner> SpawnedFor = new Dictionary<uint, PlayerSpawner>();
+        private static readonly HashSet<PlayerSpawner> SpawnScheduled = new HashSet<PlayerSpawner>();
         private static readonly HashSet<string> AnvilFloors = new HashSet<string>();
         private static readonly HashSet<string> EnchantFloors = new HashSet<string>();
         private static readonly HashSet<string> MiracleFloors = new HashSet<string>();
@@ -152,19 +153,41 @@ namespace SephiriaTogether
 
         internal static void ScheduleSpawn(PlayerSpawner player)
         {
-            if (Plugin.InstanceForPatches != null && player != null)
+            if (Plugin.InstanceForPatches != null && player != null && SpawnScheduled.Add(player))
                 Plugin.InstanceForPatches.StartCoroutine(SpawnAfterTravel(player));
         }
 
         private static IEnumerator SpawnAfterTravel(PlayerSpawner player)
         {
-            yield return new WaitForSeconds(1f);
-            TrySpawn(player);
+            const float retryWindow = 15f;
+            float deadline = Time.realtimeSinceStartup + retryWindow;
+            try
+            {
+                while (NetworkServer.active && player != null && Time.realtimeSinceStartup < deadline)
+                {
+                    if (SpawnedFor.Values.Any(owner => owner == player) || TrySpawn(player))
+                        yield break;
+                    yield return new WaitForSeconds(0.25f);
+                }
+
+                if (NetworkServer.active && player != null && CatchUpRewards.AvailableWeaponCredits(player) > 0)
+                {
+                    NetworkConnectionToClient connection = player.connectionToClient;
+                    Plugin.LogInfo($"Catch-up Anvil spawn retry window expired: player={player.PlayerAvatar?.Name}, " +
+                                   $"conn={connection?.connectionId ?? -1}, clientMod={CatchUpRewards.IsModdedConnection(connection)}, " +
+                                   $"ready={connection?.isReady ?? false}, floor={Short(player.PlayerAvatar?.currentFloorGuid)}.");
+                }
+            }
+            finally
+            {
+                SpawnScheduled.Remove(player);
+            }
         }
 
         internal static bool TrySpawn(PlayerSpawner player)
         {
-            if (!CatchUpRewards.CanSpawnCompensation(player) ||
+            NetworkConnectionToClient connection = player?.connectionToClient;
+            if (!CatchUpRewards.CanSpawnCompensation(player) || connection == null || !connection.isReady ||
                 CatchUpRewards.AvailableWeaponCredits(player) <= 0 || SpawnedFor.Values.Any(owner => owner == player))
             {
                 return false;
@@ -194,11 +217,15 @@ namespace SephiriaTogether
                 string hash = HashGuid(other.playerGuid);
                 if (!anvil.enhancedGuidHashes.Contains(hash)) anvil.enhancedGuidHashes.Add(hash);
             }
-            NetworkServer.Spawn(instance);
-            PersonalizedVisibility.Register(anvil.netIdentity, player.connectionToClient);
+            // The vanilla Anvil is a network object, but this catch-up copy belongs to one
+            // remote player. Assigning its owner makes delivery reliable for late joiners;
+            // the command remains requiresAuthority=false just like the vanilla object.
+            NetworkServer.Spawn(instance, connection);
+            PersonalizedVisibility.Register(anvil.netIdentity, connection);
             SpawnedFor[anvil.netId] = player;
             CatchUpRewards.LockWeaponCredit(player);
-            Plugin.LogInfo($"Catch-up Anvil spawned: player={player.PlayerAvatar.Name}, netId={anvil.netId}, " +
+            Plugin.LogInfo($"Catch-up Anvil spawned: player={player.PlayerAvatar.Name}, conn={connection.connectionId}, " +
+                           $"clientMod={CatchUpRewards.IsModdedConnection(connection)}, netId={anvil.netId}, " +
                            $"floor={Short(player.PlayerAvatar.currentFloorGuid)}, pos={instance.transform.position}.");
             return true;
         }
@@ -249,6 +276,7 @@ namespace SephiriaTogether
         {
             PlayerSpawner player = connection?.identity != null ? connection.identity.GetComponent<PlayerSpawner>() : null;
             if (player == null) return;
+            SpawnScheduled.Remove(player);
             foreach (uint netId in SpawnedFor.Where(entry => entry.Value == player).Select(entry => entry.Key).ToArray())
             {
                 SpawnedFor.Remove(netId);
@@ -264,6 +292,7 @@ namespace SephiriaTogether
         internal static void Clear()
         {
             SpawnedFor.Clear();
+            SpawnScheduled.Clear();
             AnvilFloors.Clear();
             EnchantFloors.Clear();
             MiracleFloors.Clear();

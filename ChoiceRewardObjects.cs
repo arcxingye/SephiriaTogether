@@ -108,11 +108,12 @@ namespace SephiriaTogether
         {
             PlayerSpawner player = sender?.identity != null ? sender.identity.GetComponent<PlayerSpawner>() : null;
             if (altar == null || player == null) return;
-            if (!Enchants.TryGetValue(altar.netId, out PlayerSpawner owner) || owner != player)
+            if (!Enchants.TryGetValue(altar.netId, out PlayerSpawner owner))
             {
                 CatchUpRewards.MarkCurrentEnchantClaimed(player);
                 return;
             }
+            if (!SamePlayer(owner, player)) return;
             PersonalizedVisibility.Unregister(altar.netIdentity);
             Enchants.Remove(altar.netId);
             CatchUpRewards.CompleteEnchantCredit(player);
@@ -124,6 +125,7 @@ namespace SephiriaTogether
         {
             PlayerSpawner player = sender?.identity != null ? sender.identity.GetComponent<PlayerSpawner>() : null;
             if (altar == null || player == null || string.IsNullOrEmpty(player.playerGuid)) return false;
+            if (Enchants.TryGetValue(altar.netId, out PlayerSpawner owner) && !SamePlayer(owner, player)) return false;
             Dictionary<string, int> remaining = EnchantRemaining.GetValue(altar) as Dictionary<string, int>;
             return remaining == null || !remaining.TryGetValue(player.playerGuid, out int count)
                 ? altar.localUseCount > 0
@@ -134,7 +136,7 @@ namespace SephiriaTogether
         {
             PlayerSpawner player = controller != null ? controller.GetComponent<PlayerSpawner>() : null;
             if (selector == null || player == null) return;
-            if (!Miracles.TryGetValue(selector.netId, out PlayerSpawner owner) || owner != player)
+            if (!Miracles.TryGetValue(selector.netId, out PlayerSpawner owner) || !SamePlayer(owner, player))
             {
                 CatchUpRewards.MarkCurrentChoiceClaimed(player, EFloorMainEventType.Miracle);
                 return;
@@ -201,6 +203,15 @@ namespace SephiriaTogether
             }
         }
 
+        private static bool SamePlayer(PlayerSpawner left, PlayerSpawner right)
+        {
+            if (left == right) return true;
+            if (left == null || right == null) return false;
+            if (!string.IsNullOrEmpty(left.playerGuid) && !string.IsNullOrEmpty(right.playerGuid))
+                return left.playerGuid == right.playerGuid;
+            return left.connectionToClient != null && left.connectionToClient == right.connectionToClient;
+        }
+
         private static string HashGuid(string guid)
         {
             using SHA256 sha = SHA256.Create();
@@ -217,25 +228,16 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(AltarOfEnchant), "UserCode_CmdUse__NetworkConnectionToClient")]
     internal static class CompleteCatchUpEnchantPatch
     {
-        private static void Prefix(AltarOfEnchant __instance, NetworkConnectionToClient sender, out bool __state) =>
+        private static bool Prefix(AltarOfEnchant __instance, NetworkConnectionToClient sender, out bool __state)
+        {
+            __state = false;
             __state = ChoiceRewardObjects.CanUseEnchant(__instance, sender);
+            return true;
+        }
 
         private static void Postfix(AltarOfEnchant __instance, NetworkConnectionToClient sender, bool __state)
         {
             if (__state) ChoiceRewardObjects.CompleteEnchant(__instance, sender);
-        }
-    }
-
-    [HarmonyPatch(typeof(MiracleSelector2), "UserCode_CmdHandleMiracleAcquired__MiracleController")]
-    internal static class CompleteCatchUpMiraclePatch
-    {
-        private static void Prefix(MiracleSelector2 __instance, out int __state) =>
-            __state = __instance != null ? __instance.acquiredHashes.Count : 0;
-
-        private static void Postfix(MiracleSelector2 __instance, MiracleController miracleController, int __state)
-        {
-            if (__instance != null && __instance.acquiredHashes.Count > __state)
-                ChoiceRewardObjects.CompleteMiracle(__instance, miracleController);
         }
     }
 
@@ -245,9 +247,25 @@ namespace SephiriaTogether
         private static void Prefix(AltarOfEnchant __instance) => ChoiceRewardObjects.ReleaseEnchant(__instance);
     }
 
+    [HarmonyPatch(typeof(MiracleSelector2), "UserCode_CmdHandleMiracleAcquired__MiracleController")]
+    internal static class CompleteCatchUpMiraclePatch
+    {
+        private static void Prefix(MiracleSelector2 __instance, out int __state) =>
+            __state = __instance != null ? __instance.acquiredHashes.Count : 0;
+
+        private static void Postfix(MiracleSelector2 __instance, MiracleController __0, int __state)
+        {
+            if (__instance != null && __instance.acquiredHashes.Count > __state)
+                ChoiceRewardObjects.CompleteMiracle(__instance, __0);
+        }
+    }
+
     [HarmonyPatch(typeof(MiracleSelector2), "OnDestroy")]
     internal static class ReleaseCatchUpMiraclePatch
     {
-        private static void Prefix(MiracleSelector2 __instance) => ChoiceRewardObjects.ReleaseMiracle(__instance);
+        private static void Prefix(MiracleSelector2 __instance)
+        {
+            ChoiceRewardObjects.ReleaseMiracle(__instance);
+        }
     }
 }

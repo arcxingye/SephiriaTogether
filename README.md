@@ -46,21 +46,23 @@ If BepInEx 5 is already installed:
 
 See `INSTALL.md` for bilingual beginner instructions.
 
-The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients; clients that need custom compensation, transfers, progress selection, rescue requests, or IP/LAN rooms should install the plugin. Game and Mod version differences no longer block joining; a temporary warning is shown for 20 seconds and then disappears.
+The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients. The host directly grants automatic catch-up and creates vanilla compensation objects such as Anvils, so those objects can be used without the client plugin; install the plugin for the F8 compensation status page, transfers, progress selection, rescue requests, or IP/LAN rooms. Game and Mod version differences no longer block joining; a temporary warning is shown for 20 seconds and then disappears.
+
+`EnableAntiCheat` is intentionally basic. When enabled by the host, it blocks direct remote money mutations and explicit direct inventory writes; native rewards and other game interactions remain under the original game flow. The host can handle any other suspicious behavior through the native kick interface.
 
 The optional delayed healing is host-authoritative. Players do not heal for 10 seconds after taking damage, then recover at a fixed 1 HP/s, including during combat. It uses the game's normal HP synchronization, so clients do not need the plugin.
 
-Fresh mid-run players are caught up to the same-floor party median for money, current dice, and maximum dice, receive expansions from missed Inventory Storage floors, and receive their own Dimension Pocket items. These grants are host-side and do not require the client plugin. If both host and client use Sephiria Together, the client menu also exposes host-validated weapon upgrades, enchants, Charms, Miracles, Stone Tablets, and boss reward choices inferred from missed route floors.
+Fresh mid-run players are caught up to the same-floor party median for money, current dice, and maximum dice, receive expansions from missed Inventory Storage floors, and receive their own Dimension Pocket items. These grants are host-side and do not require the client plugin. Vanilla catch-up objects, including Anvils, are also created by the host and can be used by unmodded clients. If both host and client use Sephiria Together, the client menu additionally exposes host-validated weapon upgrades, enchants, Charms, Miracles, Stone Tablets, and boss reward choices inferred from missed route floors.
 
 Disconnected players receive the same route-difference catch-up if they rejoin after the party has advanced. Immediate rejoins with no missed floors receive nothing, and Dimension Pocket items are never granted again on rejoin.
 
-Weapon-upgrade, enchant, Charm, Miracle, Stone Tablet, Tablet Fusion, and boss reward entitlements are stored by the host in the current run under a hashed player identity. Pending choices survive disconnects and game restarts, counted route floors cannot generate the same entitlement twice, and every successful claim is deducted and saved immediately. The client F8 panel shows host confirmation and the number of choices already claimed this run. Miracle catch-up offers a stable host-generated set of three choices. Charm, Tablet, and boss claims create vanilla owner-authority Sephirite rewards, so their final item selection still uses the game's normal server validation.
+Weapon-upgrade, enchant, Charm, Miracle, Stone Tablet, Tablet Fusion, and boss reward entitlements are stored by the host in the current run under a hashed player identity. Pending choices survive disconnects and game restarts, counted route floors cannot generate the same entitlement twice, and every successful claim is deducted and saved immediately. The F8 panel is available to modded clients and shows host confirmation plus the number of choices already claimed this run. Vanilla clients can still use the host-spawned original compensation objects. Miracle catch-up offers a stable host-generated set of three choices. Charm, Tablet, and boss claims create vanilla owner-authority Sephirite rewards, so their final item selection still uses the game's normal server validation.
 
 Selectable catch-up is delivered through vanilla network objects placed near the player: Anvil, Enchant altar, Miracle selector, Charm Sephirite, Tablet Sephirite, Tablet Combiner, and boss reward choices. The menu is status-only and does not choose or generate rewards. Catch-up objects are visible only to their target player, and unmodded clients can use these original objects and interfaces; the host consumes an entitlement only after the vanilla completion command succeeds. Tablet Combiner compensation remains player-owned, preserves the normal money cost and tablet validation, and is consumed only after a successful fusion.
 
 The base game does not save the exact unclaimed Miracle, Tablet, or boss candidate payload after a floor is unloaded. Historical catch-up therefore creates a deterministic equivalent offer; it does not claim to restore the exact candidates that were visible on the missed floor.
 
-Missed HP floors apply the vanilla 60% heal, Max HP floors grant the vanilla `MAX_HP_NORATIO/20` status and heal 20 HP, Sapphire floors grant one run Sapphire, and inventory floors grant one slot up to the vanilla cap. These use vanilla synchronized server state and work for clients without the plugin. The host never sends custom compensation messages to a client until that client completes the Sephiria Together handshake; selectable entitlements for unmodded clients remain saved instead of being discarded or chosen automatically.
+Missed HP floors apply the vanilla 60% heal, Max HP floors grant the vanilla `MAX_HP_NORATIO/20` status and heal 20 HP, Sapphire floors grant one run Sapphire, and inventory floors grant one slot up to the vanilla cap. These use vanilla synchronized server state and work for clients without the plugin. The host does not send custom menu or claim messages to an unmodded client; it still creates the applicable vanilla compensation objects, and the host-side entitlement remains until the original object is successfully claimed.
 
 The menu is organized into Rules, Compensation, Diagnostics, History, Saves, and Transfer tabs. Rules contains host multiplayer, scaling, player controls, and IP transport settings. Transfer lets a modded sender choose any other online player, enter a whole Leaf amount, and confirm it. The host validates the sender identity, target, positive amount, balance, overflow, and request rate before atomically moving the Leaves; recipients do not need the mod. The menu shortcut is configurable through `Interface/MenuShortcut`, defaulting to `F8`; modifier keys are supported by the BepInEx `KeyboardShortcut` format.
 
@@ -78,7 +80,7 @@ The IP transport is installed before the first network session. If Steam is not 
 
 After selecting a save, open the game's original multiplayer panel:
 
-1. The host chooses **Create Room**, configures the room, and confirms. The host immediately enters the original joined-room page and MultiZone; no client is required to enter the room.
+1. The host chooses **Create Room**, configures the room, and confirms. The host immediately enters the original joined-room page and MultiZone; no client is required to enter the room. After a successful, failed, or abandoned run, an active IP room keeps listening and returns the host to MultiZone for the next run.
 2. A client can press **Refresh**. The Mod sends an on-demand discovery query to broadcast addresses and up to two same-subnet `/24` ranges. Confirmed IP rooms appear in the original room list as `LAN` entries.
 3. A client can also press the original **Join** button and enter `IP` or `IP:port` manually.
 
@@ -94,6 +96,8 @@ IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player li
 - `MaximumExtraMultiplier`: cap on this plugin's multiplier. Default: `8`. Use `0` for no cap.
 - `AllowLowerProgressPlayers`: publish the host lobby as unrestricted by chapter and bypass the local chapter gate when joining. Default: `true`.
 - `AllowMidRunJoin`: keep the Steam lobby open and accept fresh players after a dungeon run starts. On the host, it also enables the server's GUID-based reconnect path without requiring `-allow_rejoin`. Fresh joining clients do not need the plugin; clients that need the game's automatic reconnect UI should also install it or launch with `-allow_rejoin`. Default: `true`.
+- `AllowAttackingMerchants`: allow players and their followers to damage merchants. The host enforces this rule and clients do not need the plugin. Default: `false`.
+- `EnableAntiCheat`: enable the basic host-side filter for direct remote money changes and direct item writes. Native rewards and other interactions remain native; the host handles other abuse by kicking the player. Clients do not need the plugin. Default: `false`.
 - `ScaleEnemyCount`: increase enemy count for procedural multiplayer waves. Default: `true`.
 - `EnemyCountPerExtraPlayer`: extra procedural-wave enemies per player above the baseline. Default: `0.08` (8%).
 - `MaximumEnemyCountMultiplier`: cap for the additional procedural-wave count multiplier. Default: `3`.
@@ -112,7 +116,7 @@ When the host has this option enabled, players who have already unlocked multipl
 
 The plugin records version differences for diagnostics but does not block them. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
 
-Fresh mid-run players follow the game's existing floor join behavior: normally they enter at the host floor's spawn point; during a boss fight the game places them near the host. EXP catch-up uses the normal `AddExp` path, so level-up Sephirite choices, level-derived inventory expansion and other level-up effects are generated exactly as they are for earned experience. Catch-up never selects a weapon build path for a player; selectable rewards are retained in the host entitlement ledger for the client menu.
+Fresh mid-run players follow the game's existing floor join behavior: normally they enter at the host floor's spawn point; during a boss fight the game places them near the host. EXP catch-up uses the normal `AddExp` path, so level-up Sephirite choices, level-derived inventory expansion and other level-up effects are generated exactly as they are for earned experience. Catch-up never selects a weapon build path for a player; selectable rewards remain in the host entitlement ledger until claimed through a vanilla compensation object or, for modded clients, the corresponding status flow.
 
 Fresh mid-run joining requires a current run using the game's per-player save format (`SaveVersion != 0`). Legacy single-player run saves are rejected for fresh mid-run joining to prevent overwriting existing run data. Set the options before starting the run; changing lobby-related options during an active run does not retroactively update Steam lobby metadata.
 
@@ -134,7 +138,7 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
- .\scripts\package.ps1 -Version 3.8.0
+ .\scripts\package.ps1 -Version 3.9.0
 ```
 
 This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.

@@ -16,7 +16,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.8.0";
+        public const string PluginVersion = "3.9.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> baseEnemyMultiplier;
@@ -27,6 +27,7 @@ namespace SephiriaTogether
         internal static ConfigEntry<bool> allowUngroupedStageTransition;
         internal static ConfigEntry<bool> breathingHeal;
         internal static ConfigEntry<bool> friendlyFire;
+        internal static ConfigEntry<bool> allowAttackingMerchants;
         internal static ConfigEntry<bool> scaleEnemyCount;
         internal static ConfigEntry<float> enemyCountPerExtraPlayer;
         internal static ConfigEntry<float> maximumEnemyCountMultiplier;
@@ -35,6 +36,7 @@ namespace SephiriaTogether
         internal static ConfigEntry<KeyboardShortcut> rescueShortcut;
         internal static ConfigEntry<bool> reviveWhenClear;
         internal static ConfigEntry<bool> bossLifesteal;
+        internal static ConfigEntry<bool> antiCheat;
         internal static ConfigEntry<bool> directModeEnabled;
         internal static ConfigEntry<int> directPort;
         private Harmony harmony;
@@ -136,6 +138,16 @@ namespace SephiriaTogether
                 "FriendlyFire",
                 false,
                 "Allow player attacks to damage other players. Damage is reduced to 1%, with 1 minimum and 5 maximum per hit.");
+            allowAttackingMerchants = Config.Bind(
+                "Multiplayer",
+                "AllowAttackingMerchants",
+                false,
+                "Allow players and their followers to damage merchants. Default: false.");
+            antiCheat = Config.Bind(
+                "Multiplayer",
+                "EnableAntiCheat",
+                false,
+                "Enable the basic host-side filter for direct remote money changes and direct item writes. Default: false.");
             scaleEnemyCount = Config.Bind(
                 "Scaling",
                 "ScaleEnemyCount",
@@ -166,7 +178,8 @@ namespace SephiriaTogether
                 $"per player above {Math.Max(0, scalingStartsAbove.Value)}. Host only.");
             Logger.LogInfo(
                 $"Mid-run join={allowMidRunJoin.Value}, catch-up EXP=100%, " +
-                $"lower-progress join={allowLowerProgressPlayers.Value}.");
+                $"lower-progress join={allowLowerProgressPlayers.Value}, merchant attacks={allowAttackingMerchants.Value}, " +
+                $"anti-cheat={antiCheat.Value}.");
         }
 
         internal static int BaselinePlayersValue => scalingStartsAbove.Value;
@@ -255,7 +268,6 @@ namespace SephiriaTogether
 
         private void OnGUI()
         {
-            HandleMenuShortcutEvent();
             RescueAlerts.Draw();
             VersionReminder.Draw();
             CoopMenu.Draw();
@@ -263,6 +275,7 @@ namespace SephiriaTogether
 
         private void Update()
         {
+            HandleMenuShortcut();
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
             MoneyTransfer.Tick();
@@ -271,34 +284,81 @@ namespace SephiriaTogether
             IpTransport.EnsureInstalled();
         }
 
-        private static void HandleMenuShortcutEvent()
+        private static void HandleMenuShortcut()
         {
-            Event current = Event.current;
-            if (CoopMenu.IsCapturingShortcut || current == null || current.type != EventType.KeyDown ||
-                !MatchesShortcut(menuShortcut.Value, current)) return;
-            current.Use();
+            if (CoopMenu.IsCapturingShortcut || !IsMenuShortcutDown()) return;
             LogInfo($"Shortcut pressed: menu={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
             CoopMenu.Toggle();
         }
 
-        private static bool MatchesShortcut(KeyboardShortcut shortcut, Event current)
+        private static bool IsMenuShortcutDown()
         {
-            if (shortcut.MainKey == KeyCode.None || current.keyCode != shortcut.MainKey) return false;
-            bool control = false;
-            bool shift = false;
-            bool alt = false;
-            bool command = false;
+            KeyboardShortcut shortcut = menuShortcut.Value;
+            if (shortcut.MainKey == KeyCode.None) return false;
+
+            // BepInEx normally adapts KeyboardShortcut to the active Unity input backend.
+            // This game can report the legacy backend as available while only the new
+            // Input System receives keyboard events, so keep a direct fallback here.
+            try
+            {
+                if (shortcut.IsDown()) return true;
+            }
+            catch (Exception)
+            {
+                // The direct Input System check below remains usable when legacy input is disabled.
+            }
+
+            Keyboard keyboard = Keyboard.current;
+            if (keyboard == null || !TryGetInputKey(shortcut.MainKey, out Key mainKey)) return false;
+            KeyControl mainControl;
+            try
+            {
+                mainControl = keyboard[mainKey];
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+            if (mainControl == null || !mainControl.wasPressedThisFrame) return false;
+
             foreach (KeyCode modifier in shortcut.Modifiers)
             {
-                if (modifier == KeyCode.LeftControl || modifier == KeyCode.RightControl) control = true;
-                else if (modifier == KeyCode.LeftShift || modifier == KeyCode.RightShift) shift = true;
-                else if (modifier == KeyCode.LeftAlt || modifier == KeyCode.RightAlt) alt = true;
-                else if (modifier == KeyCode.LeftCommand || modifier == KeyCode.RightCommand ||
-                         modifier == KeyCode.LeftWindows || modifier == KeyCode.RightWindows) command = true;
-                else return false;
+                if (!TryGetInputKey(modifier, out Key modifierKey)) return false;
+                try
+                {
+                    if (keyboard[modifierKey] == null || !keyboard[modifierKey].isPressed) return false;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
             }
-            return current.control == control && current.shift == shift && current.alt == alt &&
-                   current.command == command;
+            return true;
+        }
+
+        private static bool TryGetInputKey(KeyCode keyCode, out Key key)
+        {
+            string name = keyCode.ToString();
+            if (name.StartsWith("Alpha", StringComparison.Ordinal))
+                name = "Digit" + name.Substring("Alpha".Length);
+            else if (name.StartsWith("Keypad", StringComparison.Ordinal))
+                name = "Numpad" + name.Substring("Keypad".Length);
+
+            switch (name)
+            {
+                case "BackQuote": name = "Backquote"; break;
+                case "LeftControl": name = "LeftCtrl"; break;
+                case "RightControl": name = "RightCtrl"; break;
+                case "LeftCommand":
+                case "LeftWindows":
+                case "LeftApple": name = "LeftMeta"; break;
+                case "RightCommand":
+                case "RightWindows":
+                case "RightApple": name = "RightMeta"; break;
+                case "Print": name = "PrintScreen"; break;
+                case "Return": name = "Enter"; break;
+            }
+            return Enum.TryParse(name, true, out key);
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)

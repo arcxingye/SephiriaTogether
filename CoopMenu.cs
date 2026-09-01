@@ -212,6 +212,10 @@ namespace SephiriaTogether
                 GUILayout.Label(MenuText.Get("AutoReviveWhenClearHelp"), muted);
                 DrawToggle(MenuText.Get("FriendlyFire"), Plugin.friendlyFire);
                 GUILayout.Label(MenuText.Get("FriendlyFireHelp"), muted);
+                DrawToggle(MenuText.Get("AllowAttackingMerchants"), Plugin.allowAttackingMerchants);
+                GUILayout.Label(MenuText.Get("AllowAttackingMerchantsHelp"), muted);
+                DrawToggle(MenuText.Get("AntiCheat"), Plugin.antiCheat);
+                GUILayout.Label(MenuText.Get("AntiCheatHelp"), muted);
                 EndSection();
 
                 if (!IpTransport.CanChangeSettings)

@@ -300,6 +300,7 @@ namespace SephiriaTogether
             {
                 SteamInvitation.waitForExternalConnect = false;
                 VersionCompatibility.AbortClientJoin();
+                IpLobby.ResetClientPanel();
                 ShowMessage(MenuText.Get("IpProfileLoadFailed"));
                 yield break;
             }
@@ -311,6 +312,7 @@ namespace SephiriaTogether
             {
                 SteamInvitation.waitForExternalConnect = false;
                 VersionCompatibility.AbortClientJoin();
+                IpLobby.ResetClientPanel();
                 yield break;
             }
             telepathy.port = port;

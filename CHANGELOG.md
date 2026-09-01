@@ -1,5 +1,15 @@
 # Changelog
 
+## 3.9.0
+
+- Add an optional basic host-side filter for direct remote money changes and direct item writes. It is disabled by default; other behavior remains under the host's normal kick controls.
+- Add a host rule controlling whether players and their followers can damage merchants. Merchant attacks are disabled by default and require no client plugin.
+- Keep Boss cutscene skip votes fixed to the players who received the cutscene; players joining after it starts no longer block everyone inside it.
+- Apply the current hard-mode Heavy Heart and healing penalty to players who join or reconnect after the run starts.
+- Make catch-up Anvil delivery independent of client Mod installation by waiting for the remote connection and floor objects to be ready; clarify that vanilla catch-up objects can be used by unmodded clients.
+- Keep active IP rooms in MultiZone after a successful, failed, or abandoned run, make Enter MultiZone work without a Steam lobby, and preserve normal host exit back to town.
+- Detect the F8 menu shortcut through Unity's active input system so the menu still opens when legacy input does not receive the key event.
+
 ## 3.8.0
 
 - Allow different game and Sephiria Together versions to connect; show one non-blocking 20-second countdown warning per room instead of rejecting or permanently displaying the mismatch.
