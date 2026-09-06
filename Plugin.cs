@@ -16,7 +16,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.9.0";
+        public const string PluginVersion = "3.9.4";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> baseEnemyMultiplier;
@@ -31,6 +31,7 @@ namespace SephiriaTogether
         internal static ConfigEntry<bool> scaleEnemyCount;
         internal static ConfigEntry<float> enemyCountPerExtraPlayer;
         internal static ConfigEntry<float> maximumEnemyCountMultiplier;
+        internal static ConfigEntry<bool> offlineDirectModeEnabled;
         internal static ConfigEntry<int> playerLimit;
         internal static ConfigEntry<KeyboardShortcut> menuShortcut;
         internal static ConfigEntry<KeyboardShortcut> rescueShortcut;
@@ -71,7 +72,12 @@ namespace SephiriaTogether
                 "DirectConnect",
                 "Enabled",
                 false,
-                "Use the TCP/IP transport before a network session starts. Offline environments enable it automatically.");
+                "Use the TCP/IP transport before a network session starts while Steam is online.");
+            offlineDirectModeEnabled = Config.Bind(
+                "DirectConnect",
+                "OfflineEnabled",
+                true,
+                "Use the TCP/IP transport before a network session starts when Steam is offline.");
             directPort = Config.Bind(
                     "DirectConnect",
                     "Port",

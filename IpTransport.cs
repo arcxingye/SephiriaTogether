@@ -21,8 +21,16 @@ namespace SephiriaTogether
         internal static bool IsActive => active && NetworkManager.singleton != null &&
                                          NetworkManager.singleton.transport is TelepathyTransport;
         internal static bool IsOfflineEnvironment => offlineEnvironment;
-        internal static bool ShouldUseIp => environmentKnown && offlineEnvironment ||
-                                            (Plugin.directModeEnabled != null && Plugin.directModeEnabled.Value);
+        internal static bool ShouldUseIp
+        {
+            get
+            {
+                if (!environmentKnown) return false;
+                return offlineEnvironment
+                    ? Plugin.offlineDirectModeEnabled != null && Plugin.offlineDirectModeEnabled.Value
+                    : Plugin.directModeEnabled != null && Plugin.directModeEnabled.Value;
+            }
+        }
         // A setting change is only allowed to select IP before a network session starts.
         // Once a session is active, the installed transport is the source of truth.
         internal static bool ShouldUseIpForUi => IsActive ||

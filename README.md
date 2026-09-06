@@ -76,7 +76,7 @@ The F8 Saves page can create a manual snapshot of the selected profile and its c
 
 ## IP and LAN rooms
 
-The IP transport is installed before the first network session. If Steam is not logged in, TCP/IP is enabled automatically. Steam users can enable `DirectConnect/Enabled` in the F8 menu or config; changes apply before a room starts, while an active room or game session cannot hot-switch transport. The default TCP game port is `7777`.
+The IP transport is installed before the first network session. Offline builds enable TCP/IP by default, but it can be disabled with `DirectConnect/OfflineEnabled` in the F8 menu or config. Steam users control it with `DirectConnect/Enabled`. Changes apply before a room starts, while an active room or game session cannot hot-switch transport. The default TCP game port is `7777`.
 
 After selecting a save, open the game's original multiplayer panel:
 
@@ -101,7 +101,8 @@ IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player li
 - `ScaleEnemyCount`: increase enemy count for procedural multiplayer waves. Default: `true`.
 - `EnemyCountPerExtraPlayer`: extra procedural-wave enemies per player above the baseline. Default: `0.08` (8%).
 - `MaximumEnemyCountMultiplier`: cap for the additional procedural-wave count multiplier. Default: `3`.
-- `DirectConnect/Enabled`: enable TCP/IP rooms while no network session is active. Offline environments enable IP automatically. Default: `false`.
+- `DirectConnect/Enabled`: enable TCP/IP rooms while Steam is online and no network session is active. Default: `false`.
+- `DirectConnect/OfflineEnabled`: enable TCP/IP rooms while Steam is offline and no network session is active. Default: `true`.
 - `DirectConnect/Port`: TCP game port. It can be changed before a session starts; an active session keeps its current transport and port. Default: `7777`. LAN discovery uses UDP `7780`.
 
 `PlayerLimit` is applied when creating the next host/Lobby. Do not rely on changing it after a server is already listening. The F8 menu is host-only for gameplay settings; clients can install the plugin for reconnect UI compatibility but cannot configure the host.
@@ -138,7 +139,7 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
- .\scripts\package.ps1 -Version 3.9.0
+ .\scripts\package.ps1 -Version 3.9.4
 ```
 
 This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.

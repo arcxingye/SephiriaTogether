@@ -23,6 +23,8 @@ namespace SephiriaTogether
             new HashSet<NetworkConnectionToClient>();
         private static readonly HashSet<int> FreshSessionConnectionIds = new HashSet<int>();
         private static readonly Dictionary<int, int[]> FreshPocketItems = new Dictionary<int, int[]>();
+        private static readonly Dictionary<int, FreshFruitSkewerData> FreshFruitSkewers =
+            new Dictionary<int, FreshFruitSkewerData>();
         private static readonly FieldInfo RejoinDetectedField =
             AccessTools.Field(typeof(PlayerSpawner), "isRejoinDetected");
         private static readonly FieldInfo VersionApprovedConnectionsField =
@@ -32,6 +34,12 @@ namespace SephiriaTogether
 
         [ThreadStatic]
         private static bool bypassDungeonGate;
+
+        private sealed class FreshFruitSkewerData
+        {
+            internal GridInventory.ItemDropBonusData[] Bonuses;
+            internal int AdaptiveItemDropBonus;
+        }
 
         internal static ManualLogSource Log { get; set; }
 
@@ -191,6 +199,205 @@ namespace SephiriaTogether
             }
         }
 
+        internal static void CaptureRemoteFruitSkewer(PlayerSpawner spawner,
+            GridInventory.ItemDropBonusData[] bonuses, int adaptiveItemDropBonus)
+        {
+            NetworkConnectionToClient connection = spawner?.connectionToClient;
+            if (!NetworkServer.active || connection == null || connection == NetworkServer.localConnection) return;
+
+            GridInventory.ItemDropBonusData[] snapshot =
+                (bonuses ?? Array.Empty<GridInventory.ItemDropBonusData>()).Take(64).ToArray();
+            FreshFruitSkewers[connection.connectionId] = new FreshFruitSkewerData
+            {
+                Bonuses = snapshot,
+                AdaptiveItemDropBonus = adaptiveItemDropBonus
+            };
+            Log?.LogInfo($"Captured remote fruit skewer: conn={connection.connectionId}, " +
+                         $"entries={snapshot.Length}, adaptive={adaptiveItemDropBonus}.");
+        }
+
+        private static FreshFruitSkewerData TakeFreshFruitSkewer(PlayerSpawner spawner)
+        {
+            int connectionId = spawner?.connectionToClient?.connectionId ?? -1;
+            if (connectionId < 0 || !FreshFruitSkewers.TryGetValue(connectionId, out FreshFruitSkewerData data))
+                return null;
+            FreshFruitSkewers.Remove(connectionId);
+            return data;
+        }
+
+        private static void ApplyFreshFruitSkewer(PlayerSpawner spawner)
+        {
+            FreshFruitSkewerData data = TakeFreshFruitSkewer(spawner);
+            PlayerAvatar player = spawner?.PlayerAvatar;
+            GridInventory inventory = player?.Inventory;
+            if (data == null || player == null || inventory == null) return;
+
+            int maxSlots;
+            try
+            {
+                long capacity = (long)KeywordDatabase.GetConstValue("fruitSkewerDefaultCount") +
+                    player.GetCustomStatUnsafe("FRUITCOUNT");
+                maxSlots = (int)Math.Min(64L, Math.Max(0L, capacity));
+            }
+            catch (Exception exception)
+            {
+                Log?.LogWarning($"Could not determine fresh fruit skewer capacity for {Describe(spawner)}: " +
+                                 exception.Message);
+                return;
+            }
+
+            int adaptive = data.AdaptiveItemDropBonus == 1 && maxSlots > 0 ? 1 : 0;
+            int fruitSlots = Math.Max(0, maxSlots - adaptive);
+            int plusLimit = Math.Max(0, KeywordDatabase.GetConstValue("fruitSkewerPlusLimitCount"));
+            int minusLimit = Math.Max(0, KeywordDatabase.GetConstValue("fruitSkewerMinusLimitCount"));
+            ClearFruitSkewerState(spawner, player, inventory);
+            Dictionary<string, int> plusCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            Dictionary<string, int> minusCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+            HashSet<string> sapphireCategories = new HashSet<string>(StringComparer.Ordinal);
+            List<GridInventory.ItemDropBonusData> acceptedBonuses =
+                new List<GridInventory.ItemDropBonusData>();
+            int acceptedSlots = 0;
+            int rejected = 0;
+
+            foreach (GridInventory.ItemDropBonusData bonus in
+                     data.Bonuses ?? Array.Empty<GridInventory.ItemDropBonusData>())
+            {
+                if (acceptedSlots >= fruitSlots)
+                {
+                    rejected++;
+                    continue;
+                }
+
+                if (string.IsNullOrWhiteSpace(bonus.categoryName) ||
+                    ItemDatabase.FindItemCategory(bonus.categoryName) == null || bonus.weight == 0)
+                {
+                    rejected++;
+                    continue;
+                }
+
+                Dictionary<string, int> counts = bonus.weight > 0 ? plusCounts : minusCounts;
+                int limit = bonus.weight > 0 ? plusLimit : minusLimit;
+                counts.TryGetValue(bonus.categoryName, out int count);
+                int magnitude = (int)Math.Min(Math.Abs((long)bonus.weight),
+                    Math.Min(limit - count, fruitSlots - acceptedSlots));
+                if (magnitude <= 0)
+                {
+                    rejected++;
+                    continue;
+                }
+
+                GridInventory.ItemDropBonusData normalized = new GridInventory.ItemDropBonusData
+                {
+                    categoryName = bonus.categoryName,
+                    weight = bonus.weight > 0 ? magnitude : -magnitude
+                };
+                inventory.AddItemDropWeight(normalized);
+                spawner.consumeFruitSkewerBonus.Add(normalized);
+                acceptedBonuses.Add(normalized);
+                counts[bonus.categoryName] = count + magnitude;
+                acceptedSlots += magnitude;
+
+                if (bonus.weight > 0 && spawner.sapphireBonusCategoryList.Contains(bonus.categoryName) &&
+                    sapphireCategories.Add(bonus.categoryName))
+                {
+                    StatusInstance status = StatusDatabase.CreateStatusEntity(
+                        "SAPPHIREBONUS", spawner.sapphireBonusValue);
+                    if (status != null) player.AddOrphanedStatusInstance(status);
+                }
+            }
+
+            if (adaptive != 0)
+            {
+                inventory.NetworkadaptiveItemDropBonus = adaptive;
+                spawner.NetworkadditionalAdaptiveItemDropBonus = adaptive;
+            }
+
+            if (spawner.LocalDataStorage != null)
+            {
+                spawner.LocalDataStorage.fruitSkewerBonus.Clear();
+                foreach (GridInventory.ItemDropBonusData bonus in acceptedBonuses)
+                    spawner.LocalDataStorage.fruitSkewerBonus.Add(bonus);
+                spawner.LocalDataStorage.NetworkadaptiveItemDropBonus = adaptive;
+            }
+
+            Log?.LogInfo($"Applied remote fruit skewer: player={Describe(spawner)}, " +
+                         $"accepted={acceptedSlots}, rejected={rejected}, adaptive={adaptive}, " +
+                         $"sapphireCategories={sapphireCategories.Count}.");
+        }
+
+        private static void ClearFruitSkewerState(PlayerSpawner spawner, PlayerAvatar player,
+            GridInventory inventory)
+        {
+            inventory.ClearItemDropBonus();
+            inventory.NetworkadaptiveItemDropBonus = 0;
+            spawner.consumeFruitSkewerBonus.Clear();
+            spawner.NetworkadditionalAdaptiveItemDropBonus = 0;
+            foreach (StatusInstance status in player.orphanedStatusInstancesServerside.ToArray())
+            {
+                if (status == null || status.ID != "SAPPHIREBONUS") continue;
+                status.RemoveStatus();
+                status.ClearTarget();
+                player.orphanedStatusInstancesServerside.Remove(status);
+            }
+        }
+
+        internal static void ApplyCapturedFruitSkewerAfterCommand(PlayerSpawner spawner)
+        {
+            if (!NetworkServer.active || spawner?.connectionToClient == null ||
+                spawner.connectionToClient == NetworkServer.localConnection)
+                return;
+            if (RejoinDetectedField != null && (bool)RejoinDetectedField.GetValue(spawner))
+            {
+                ApplyCapturedFruitSkewerIfMissing(spawner);
+                return;
+            }
+            if (DungeonManager.Instance != null && DungeonManager.Instance.isRunStarted)
+                ApplyFreshFruitSkewer(spawner);
+        }
+
+        internal static void ApplyCapturedFruitSkewersAfterRunStart()
+        {
+            if (!NetworkServer.active) return;
+            foreach (int connectionId in FreshFruitSkewers.Keys.ToArray())
+            {
+                if (!NetworkServer.connections.TryGetValue(connectionId, out NetworkConnectionToClient connection) ||
+                    connection?.identity == null)
+                {
+                    FreshFruitSkewers.Remove(connectionId);
+                    continue;
+                }
+
+                PlayerSpawner spawner = connection.identity.GetComponent<PlayerSpawner>();
+                if (spawner == null) continue;
+                if (RejoinDetectedField != null && (bool)RejoinDetectedField.GetValue(spawner))
+                    ApplyCapturedFruitSkewerIfMissing(spawner);
+                else
+                    ApplyFreshFruitSkewer(spawner);
+            }
+        }
+
+        private static void ApplyCapturedFruitSkewerIfMissing(PlayerSpawner spawner)
+        {
+            if (spawner?.PlayerAvatar?.Inventory == null) return;
+            GridInventory inventory = spawner.PlayerAvatar.Inventory;
+            bool hasFruitState = spawner.consumeFruitSkewerBonus.Count > 0 ||
+                                 spawner.additionalAdaptiveItemDropBonus != 0 ||
+                                 inventory.itemDropBonusByCategory.Count > 0 ||
+                                 inventory.adaptiveItemDropBonus != 0;
+            if (hasFruitState)
+            {
+                TakeFreshFruitSkewer(spawner);
+                return;
+            }
+
+            if (FreshFruitSkewers.ContainsKey(spawner.connectionToClient?.connectionId ?? -1))
+            {
+                Log?.LogWarning($"Rejoin fruit skewer state missing; applying captured local selection: " +
+                                 $"player={Describe(spawner)}.");
+                ApplyFreshFruitSkewer(spawner);
+            }
+        }
+
         private static void OnServerFreshPocketItems(NetworkConnectionToClient connection, FreshPocketItemsMessage message)
         {
             if (connection == null || !VersionCompatibility.IsProtocolCompatibleConnection(connection)) return;
@@ -231,6 +438,7 @@ namespace SephiriaTogether
                 FreshConnections.Remove(connection);
                 FreshSessionConnectionIds.Remove(connection.connectionId);
                 FreshPocketItems.Remove(connection.connectionId);
+                FreshFruitSkewers.Remove(connection.connectionId);
                 CatchUpRewards.RemoveConnection(connection);
             }
         }
@@ -240,6 +448,7 @@ namespace SephiriaTogether
             FreshConnections.Clear();
             FreshSessionConnectionIds.Clear();
             FreshPocketItems.Clear();
+            FreshFruitSkewers.Clear();
             bypassDungeonGate = false;
         }
 
@@ -287,6 +496,16 @@ namespace SephiriaTogether
             }
 
             ApplyRunDifficulty(spawner);
+
+            if (isFresh)
+            {
+                yield return null;
+                ApplyFreshFruitSkewer(spawner);
+            }
+            else if (isRejoin)
+            {
+                ApplyCapturedFruitSkewerIfMissing(spawner);
+            }
 
             if (isFresh && spawner.PlayerAvatar.IsDead)
             {
@@ -658,6 +877,7 @@ namespace SephiriaTogether
     {
         private static void Postfix()
         {
+            MidRunJoin.ApplyCapturedFruitSkewersAfterRunStart();
             if (!Plugin.allowMidRunJoin.Value)
             {
                 return;
@@ -733,6 +953,18 @@ namespace SephiriaTogether
         {
             MidRunJoin.ScheduleCatchUp(__instance);
         }
+    }
+
+    [HarmonyPatch(typeof(PlayerSpawner), "UserCode_CmdSetDefaultPlayerData__UInt64__String__String__Int32__String__String__FarmAbilityExpData[]__DestinyInscriptionPurchaseData[]__Int32[]__Int32__Int32__Int32[]__PassiveStatSaveData[]__Int32__String[]__String__ItemDropBonusData[]__Int32__UInt32")]
+    internal static class FreshFruitSkewerCommandPatch
+    {
+        private static void Prefix(PlayerSpawner __instance, GridInventory.ItemDropBonusData[] __16, int __17)
+        {
+            MidRunJoin.CaptureRemoteFruitSkewer(__instance, __16, __17);
+        }
+
+        private static void Postfix(PlayerSpawner __instance) =>
+            MidRunJoin.ApplyCapturedFruitSkewerAfterCommand(__instance);
     }
 
     [HarmonyPatch(typeof(UnitAvatar), nameof(UnitAvatar.OnStartClient))]

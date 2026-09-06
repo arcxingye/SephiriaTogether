@@ -24,6 +24,11 @@ namespace SephiriaTogether
                 miraclePrefab = spawner.miracle;
         }
 
+        internal static bool IsCatchUpMiracle(MiracleSelector2 selector)
+        {
+            return selector != null && selector.netId != 0 && Miracles.ContainsKey(selector.netId);
+        }
+
         internal static void SpawnPending(PlayerSpawner player)
         {
             if (!CatchUpRewards.CanSpawnCompensation(player)) return;

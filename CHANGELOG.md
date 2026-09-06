@@ -1,5 +1,30 @@
 # Changelog
 
+## 3.9.4
+
+- Preserve a valid saved Fruit Skewer for reconnecting players while restoring the client's uploaded selection when the run slot has lost its Fruit Skewer state.
+- Prevent repeated room restarts from permanently falling back to the 100% base combo-discovery value for an unmodded client.
+
+## 3.9.3
+
+- Rebuild each remote player's Fruit Skewer state from the validated vanilla default-data payload instead of retaining stale category or adaptive-drop values.
+- Apply the same remote Fruit Skewer state during ordinary run starts and fresh mid-run joins, including unmodded clients.
+- Keep the normal Miracle pool separate from catch-up offer capture so item discovery defaults do not leak between players or rounds.
+
+## 3.9.2
+
+- Apply each remote player's Fruit Skewer and adaptive item-drop bonus from the vanilla default-data command, including ordinary run starts and fresh mid-run joins.
+- Keep validated remote Fruit Skewer state in the player's server-side local storage so later run restarts use the same selection.
+- Prevent ordinary Miracle pools from being captured into the persistent catch-up offer cache, avoiding stale or incomplete wish pools across rounds.
+- Replace persisted legacy Miracle offer data with the deterministic fallback unless a current catch-up selector captures a fresh offer.
+
+## 3.9.1
+
+- Apply a fresh player's configured Fruit Skewer and adaptive item-drop bonus after a mid-run join completes floor travel.
+- Validate late-join Fruit Skewer categories, per-category counts, total slots, and adaptive bonus values before applying them on the host.
+- Keep rejoining players on their saved in-run Fruit Skewer state and avoid applying the fresh-join data more than once.
+- Let offline players disable the otherwise-default IP transport with `DirectConnect/OfflineEnabled` from the F8 menu or config.
+
 ## 3.9.0
 
 - Add an optional basic host-side filter for direct remote money changes and direct item writes. It is disabled by default; other behavior remains under the host's normal kick controls.

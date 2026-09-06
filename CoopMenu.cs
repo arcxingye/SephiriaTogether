@@ -745,32 +745,26 @@ namespace SephiriaTogether
         {
             if (string.IsNullOrEmpty(directPortText)) directPortText = IpTransport.ConfiguredPort.ToString();
             string status = IpTransport.IsActive ? MenuText.Get("IpActiveShort") :
-                Plugin.directModeEnabled != null && Plugin.directModeEnabled.Value
-                    ? MenuText.Get("IpPendingShort") : MenuText.Get("IpOffShort");
+                IpTransport.ShouldUseIp ? MenuText.Get("IpPendingShort") : MenuText.Get("IpOffShort");
             BeginSection(MenuText.Get("DirectConnect"));
             GUILayout.BeginHorizontal();
             GUILayout.Label(status, muted);
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
             GUILayout.Label(MenuText.Get("DirectConnectHelp"), muted);
-            if (IpTransport.IsOfflineEnvironment)
-            {
-                GUI.enabled = false;
-                GUILayout.Label(MenuText.Get("IpOfflineAutomatic"), body);
-                GUI.enabled = true;
-            }
-            else
-            {
-                GUI.enabled = IpTransport.CanChangeSettings;
-                DrawToggle(MenuText.Get("DirectMode"), Plugin.directModeEnabled.Value,
-                    () =>
-                    {
-                        Plugin.directModeEnabled.Value = !Plugin.directModeEnabled.Value;
-                        Plugin.SaveSettings();
-                        IpTransport.ApplySettingsFromMenu();
-                    });
-                GUI.enabled = true;
-            }
+            bool offline = IpTransport.IsOfflineEnvironment;
+            if (offline) GUILayout.Label(MenuText.Get("IpOfflineAutomatic"), body);
+            BepInEx.Configuration.ConfigEntry<bool> directMode = offline
+                ? Plugin.offlineDirectModeEnabled : Plugin.directModeEnabled;
+            GUI.enabled = IpTransport.CanChangeSettings;
+            DrawToggle(MenuText.Get("DirectMode"), directMode.Value,
+                () =>
+                {
+                    directMode.Value = !directMode.Value;
+                    Plugin.SaveSettings();
+                    IpTransport.ApplySettingsFromMenu();
+                });
+            GUI.enabled = true;
             GUILayout.Label(MenuText.Get("DirectPort"), body);
             GUI.enabled = IpTransport.CanChangeSettings;
             directPortText = GUILayout.TextField(directPortText ?? "", input, GUILayout.Height(30f));

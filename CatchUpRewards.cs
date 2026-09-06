@@ -1249,8 +1249,6 @@ namespace SephiriaTogether
             LoadFloorSet(credits.PendingFusionFloors, credits.SavePrefix + "PendingFusions");
             string history = SaveManager.CurrentRun.GetString(credits.SavePrefix + "History", "");
             credits.History.AddRange(history.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries));
-            credits.CapturedMiracles.AddRange(SaveManager.CurrentRun.GetString(credits.SavePrefix + "MiracleOffers", "")
-                .Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries));
             credits.CapturedBossRewards.AddRange(SaveManager.CurrentRun.GetString(credits.SavePrefix + "BossOffers", "")
                 .Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries));
             if (MigrateLegacyProcessedFloors(credits)) Save(credits);
@@ -1433,7 +1431,7 @@ namespace SephiriaTogether
 
         private static List<string> GetMiracleOptions(Credits credits)
         {
-            if (credits.CapturedMiracles.Count > 0)
+            if (credits.Miracles > 0 && credits.CapturedMiracles.Count > 0)
             {
                 return credits.CapturedMiracles.Take(3).ToList();
             }
@@ -1768,11 +1766,14 @@ namespace SephiriaTogether
 
         private static string OnOff(bool value) => MenuText.Get(value ? "ToggleOn" : "ToggleOff");
 
-        internal static void CaptureMiracles(MiracleController controller, MiracleMetadata[] candidates)
+        internal static void CaptureMiracles(MiracleSelector2 selector, MiracleController controller,
+            MiracleMetadata[] candidates)
         {
-            if (!NetworkServer.active || controller?.UnitAvatar == null || candidates == null) return;
+            if (!NetworkServer.active || !ChoiceRewardObjects.IsCatchUpMiracle(selector) ||
+                controller?.UnitAvatar == null || candidates == null) return;
             PlayerSpawner spawner = controller.UnitAvatar.GetComponent<PlayerSpawner>();
             Credits credits = GetServerCredits(spawner);
+            credits.CapturedMiracles.Clear();
             foreach (MiracleMetadata candidate in candidates)
             {
                 if (!string.IsNullOrEmpty(candidate.id) && !credits.CapturedMiracles.Contains(candidate.id))
@@ -1910,10 +1911,10 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(MiracleSelector2), "GenerateMiracles")]
     internal static class CatchUpMiracleCapturePatch
     {
-        private static void Postfix(NetworkIdentity __0, MiracleMetadata[] __result)
+        private static void Postfix(MiracleSelector2 __instance, NetworkIdentity __0, MiracleMetadata[] __result)
         {
             MiracleController controller = __0 != null ? __0.GetComponent<MiracleController>() : null;
-            CatchUpRewards.CaptureMiracles(controller, __result);
+            CatchUpRewards.CaptureMiracles(__instance, controller, __result);
         }
     }
 
