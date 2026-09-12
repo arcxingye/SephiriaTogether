@@ -1,6 +1,6 @@
 param(
     [string]$GameDir = $env:SEPHIRIA_DIR,
-    [string]$Version = "3.9.4"
+    [string]$Version = "3.9.5"
 )
 
 $ErrorActionPreference = "Stop"

@@ -51,11 +51,7 @@ namespace SephiriaTogether
                                    StringComparison.OrdinalIgnoreCase);
             if (gameMismatch || modMismatch)
             {
-                ShowTemporary(string.Format(MenuText.Get("VersionMismatchWarning"),
-                    Application.version,
-                    string.IsNullOrEmpty(gameVersion) ? MenuText.Get("VersionNotInstalled") : gameVersion,
-                    Plugin.PluginVersion,
-                    string.IsNullOrEmpty(modVersion) ? MenuText.Get("VersionNotInstalled") : modVersion),
+                ShowTemporary(VersionCompatibility.FormatVersionMismatch(gameVersion, modVersion),
                     "steam:" + manager.Lobby.ToString());
             }
         }

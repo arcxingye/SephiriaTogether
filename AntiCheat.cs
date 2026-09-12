@@ -10,6 +10,9 @@ namespace SephiriaTogether
         [ThreadStatic]
         private static NetworkConnectionToClient currentSender;
 
+        private static readonly AccessTools.FieldRef<UnitAI_NewBasic, EProceduralMerchantType> MerchantType =
+            AccessTools.FieldRefAccess<UnitAI_NewBasic, EProceduralMerchantType>("merchantType");
+
         internal static NetworkConnectionToClient CurrentSender => currentSender;
 
         internal static bool Enabled => NetworkServer.active &&
@@ -78,6 +81,34 @@ namespace SephiriaTogether
             return RejectRemote(inventory, "GridInventory direct item add unavailable entity=" + entityId);
         }
 
+        internal static bool AllowGiveMoney(UnitAvatar sender, UnitAvatar target, int amount)
+        {
+            if (!Enabled || currentSender == null || currentSender == NetworkServer.localConnection)
+                return true;
+
+            PlayerAvatar player = SenderPlayer();
+            // Buying merchant "replenishment" stock is a native client-paid flow:
+            // the client sends CmdGiveMoney to the merchant and then adds the
+            // purchased item. Blocking the payment made those items free.
+            if (amount >= 0 && sender != null && sender == player && target != null &&
+                !(target is PlayerAvatar) && IsMerchant(target))
+            {
+                Plugin.LogInfo("Anti-cheat allowed native merchant payment: player=" +
+                               (player?.Name ?? "unknown") + ", merchant=" + target.name +
+                               ", amount=" + amount + ".");
+                return true;
+            }
+
+            return RejectRemote(sender, "UnitAvatar.CmdGiveMoney amount=" + amount);
+        }
+
+        private static bool IsMerchant(UnitAvatar avatar)
+        {
+            UnitAI_NewBasic ai = avatar != null ? avatar.GetComponent<UnitAI_NewBasic>() : null;
+            return ai != null && (MerchantType(ai) != EProceduralMerchantType.None ||
+                                  avatar.faction == "Merchant");
+        }
+
         private static PlayerAvatar SenderPlayer()
         {
             if (currentSender?.identity == null) return null;
@@ -136,7 +167,7 @@ namespace SephiriaTogether
     internal static class AntiCheatGiveMoneyPatch
     {
         private static bool Prefix(UnitAvatar __instance, UnitAvatar __0, int __1) =>
-            AntiCheat.RejectRemote(__instance, "UnitAvatar.CmdGiveMoney amount=" + __1);
+            AntiCheat.AllowGiveMoney(__instance, __0, __1);
     }
 
     [HarmonyPatch(typeof(GridInventory), "UserCode_CmdAddItem__Int32__Int32__SByte__Int32__Boolean__Boolean")]

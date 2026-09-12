@@ -12,52 +12,17 @@ namespace SephiriaTogether
     [HarmonyPatch(typeof(PlayerAvatar), nameof(PlayerAvatar.RequestWorldMap))]
     internal static class WorldMapGatherRequirementPatch
     {
-        private static void Prefix(Vector3 requestPosition, out Dictionary<Transform, Vector3> __state)
+        private static void Prefix(ref float gatherDistance)
         {
-            __state = null;
             if (!NetworkServer.active || !Plugin.allowUngroupedStageTransition.Value)
             {
                 return;
             }
 
-            __state = new Dictionary<Transform, Vector3>();
-            foreach (NetworkConnectionToClient connection in NetworkServer.connections.Values)
-            {
-                PlayerAvatar avatar = connection != null && connection.identity != null
-                    ? connection.identity.GetComponent<PlayerAvatar>()
-                    : null;
-                if (avatar != null && !avatar.IsDead)
-                {
-                    __state[avatar.transform] = avatar.transform.position;
-                    avatar.transform.position = requestPosition;
-                }
-            }
-            Plugin.LogInfo($"Bypassing world-map gather distance for {__state.Count} living players.");
-        }
-
-        private static void Postfix(Dictionary<Transform, Vector3> __state) => Restore(__state);
-
-        private static System.Exception Finalizer(System.Exception __exception, Dictionary<Transform, Vector3> __state)
-        {
-            Restore(__state);
-            return __exception;
-        }
-
-        private static void Restore(Dictionary<Transform, Vector3> positions)
-        {
-            if (positions == null)
-            {
-                return;
-            }
-
-            foreach (KeyValuePair<Transform, Vector3> entry in positions)
-            {
-                if (entry.Key != null)
-                {
-                    entry.Key.position = entry.Value;
-                }
-            }
-            positions.Clear();
+            // The game now passes the gather radius in, so raise it instead of
+            // temporarily moving living player transforms to the entrance.
+            gatherDistance = float.MaxValue;
+            Plugin.LogInfo("Bypassing world-map gather distance.");
         }
     }
 

@@ -46,7 +46,7 @@ If BepInEx 5 is already installed:
 
 See `INSTALL.md` for bilingual beginner instructions.
 
-The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients. The host directly grants automatic catch-up and creates vanilla compensation objects such as Anvils, so those objects can be used without the client plugin; install the plugin for the F8 compensation status page, transfers, progress selection, rescue requests, or IP/LAN rooms. Game and Mod version differences no longer block joining; a temporary warning is shown for 20 seconds and then disappears.
+The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients. The host directly grants automatic catch-up and creates vanilla compensation objects such as Anvils, so those objects can be used without the client plugin; install the plugin for the F8 compensation status page, transfers, progress selection, rescue requests, or IP/LAN rooms. Mod version differences do not block joining; a temporary warning is shown for 20 seconds and then disappears. Game versions must match: updated game builds change the native network protocol, so a mismatched game version is rejected by the game's own authentication.
 
 `EnableAntiCheat` is intentionally basic. When enabled by the host, it blocks direct remote money mutations and explicit direct inventory writes; native rewards and other game interactions remain under the original game flow. The host can handle any other suspicious behavior through the native kick interface.
 
@@ -86,7 +86,7 @@ After selecting a save, open the game's original multiplayer panel:
 
 Discovery uses UDP `7780`; gameplay uses the configured TCP port. Allow both through the firewall. The current client sends both the current discovery query and a `3.7.0` compatibility query, so rooms hosted by the previous Mod release can still appear. Automatic discovery requires a LAN or virtual network that permits peer-to-peer traffic. Route-only game accelerators may not expose peers to one another, so manual IP joining remains available.
 
-IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player lists without requiring Steam lobby identities. Different game or Mod versions can connect when the host has the compatibility patch. A `3.7.0` host can be discovered by a `3.8.0` client after the compatibility query. For a manually entered or legacy-discovered `1.0.29` host, a `1.0.30` client retries the native authentication once with the host's game version; the old host still cannot provide newer custom protocol features.
+IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player lists without requiring Steam lobby identities. Different Mod versions can still connect when the host has the compatibility patch, but both sides must run the same game version because updated game builds change Mirror serialization and command hashes. A `3.7.0` host can be discovered by a newer client after the compatibility query, yet joining still requires the same game version.
 
 ## Configuration
 
@@ -115,7 +115,7 @@ Configuration changes take effect for newly spawned enemies. Restart the run aft
 
 When the host has this option enabled, players who have already unlocked multiplayer but have lower quest progress can use the Steam lobby list, room code or Steam invitation without installing the plugin themselves. The host publishes only the lobby's admission chapter as `0`; this plugin does not directly modify save data or quest progress.
 
-The plugin records version differences for diagnostics but does not block them. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
+The plugin records game and Mod version differences for diagnostics. Differing Mod versions remain joinable, while a game-version mismatch is rejected by the game's native authentication. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
 
 Fresh mid-run players follow the game's existing floor join behavior: normally they enter at the host floor's spawn point; during a boss fight the game places them near the host. EXP catch-up uses the normal `AddExp` path, so level-up Sephirite choices, level-derived inventory expansion and other level-up effects are generated exactly as they are for earned experience. Catch-up never selects a weapon build path for a player; selectable rewards remain in the host entitlement ledger until claimed through a vanilla compensation object or, for modded clients, the corresponding status flow.
 
@@ -139,16 +139,16 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
- .\scripts\package.ps1 -Version 3.9.4
+ .\scripts\package.ps1 -Version 3.9.5
 ```
 
 This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.
 
 ## Compatibility
 
-- Built and tested against Sephiria 1.0.30, Unity Mono, Windows x64.
+- Built and tested against Sephiria 1.0.31, Unity Mono, Windows x64.
 - Requires BepInEx 5.
-- Supports the Steam build and tested offline builds that expose compatible networking APIs; version admission is non-blocking, but changed game internals can still make a pairing unusable.
+- Supports the Steam build and tested offline builds that expose compatible networking APIs; both sides must use the same game version, and changed game internals can still make a pairing unusable.
 - Game updates can change internal methods and require a rebuild.
 
 ## License

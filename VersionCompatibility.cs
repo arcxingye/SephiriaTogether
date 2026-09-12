@@ -23,20 +23,14 @@ namespace SephiriaTogether
 
     internal static class VersionCompatibility
     {
-        private const string LegacyGameVersion = "1.0.29";
-        private const string LegacyModVersion = "3.7.0";
         private static readonly HashSet<int> HelloConnections = new HashSet<int>();
         private static readonly HashSet<int> ProtocolCompatibleConnections = new HashSet<int>();
         private static readonly Dictionary<int, string> RemoteGameVersions = new Dictionary<int, string>();
         private static readonly Dictionary<int, string> RemoteModVersions = new Dictionary<int, string>();
         private static bool clientNoticeReceived;
-        private static string authenticationTargetGameVersion = "";
         private static string remoteGameVersion = "";
         private static string remoteModVersion = "";
         private static string remoteRoomScope = "";
-        private static bool authenticationTargetSent;
-        private static bool legacyAuthenticationRetryAvailable;
-        private static bool legacyAuthenticationRetryAttempted;
         private static bool clientProtocolConfirmed;
         private static bool remoteModMetadataAuthoritative;
 
@@ -79,8 +73,6 @@ namespace SephiriaTogether
         {
             ConfigureSerialization();
             clientNoticeReceived = false;
-            authenticationTargetSent = false;
-            legacyAuthenticationRetryAttempted = false;
             clientProtocolConfirmed = false;
             NetworkClient.RegisterHandler<VersionCompatibilityNoticeMessage>(OnClientNotice, true);
             if (NetworkServer.active)
@@ -97,7 +89,6 @@ namespace SephiriaTogether
         {
             ResetClientRoomState();
             string gameVersion = lobby["z_heathenGameVersion"] ?? "";
-            authenticationTargetGameVersion = gameVersion;
             remoteGameVersion = gameVersion;
             remoteModVersion = lobby["SephiriaTogether"] ?? "";
             remoteRoomScope = "steam:" + lobby;
@@ -116,7 +107,7 @@ namespace SephiriaTogether
 
             string scope = "steam:" + manager.Lobby;
             if (!string.Equals(remoteRoomScope, scope, StringComparison.Ordinal) ||
-                string.IsNullOrEmpty(remoteModVersion) || string.IsNullOrEmpty(authenticationTargetGameVersion))
+                string.IsNullOrEmpty(remoteModVersion))
                 PrepareLobbyJoin(manager.Lobby);
         }
 
@@ -124,28 +115,21 @@ namespace SephiriaTogether
         {
             if (info == null) return;
             ResetClientRoomState();
-            authenticationTargetGameVersion = info.version ?? "";
             remoteGameVersion = info.version ?? "";
             remoteRoomScope = "eos:" + info.lobbyId;
             if (!string.IsNullOrEmpty(remoteGameVersion) &&
                 !string.Equals(remoteGameVersion, Application.version, StringComparison.OrdinalIgnoreCase))
                 ShowMismatch(remoteGameVersion, "", remoteRoomScope);
-            info.version = Application.version;
         }
 
         internal static void PrepareIpJoin(string gameVersion, string modVersion, string address, ushort port,
             bool metadataAuthoritative = false)
         {
             ResetClientRoomState();
-            authenticationTargetGameVersion = gameVersion ?? "";
             remoteGameVersion = gameVersion ?? "";
             remoteModVersion = modVersion ?? "";
             remoteRoomScope = "ip:" + address + ":" + port;
             remoteModMetadataAuthoritative = metadataAuthoritative && !string.IsNullOrEmpty(remoteModVersion);
-            legacyAuthenticationRetryAvailable = string.IsNullOrEmpty(gameVersion) &&
-                string.Equals(Application.version, "1.0.30", StringComparison.OrdinalIgnoreCase) &&
-                (string.IsNullOrEmpty(modVersion) ||
-                 string.Equals(modVersion, LegacyModVersion, StringComparison.OrdinalIgnoreCase));
         }
 
         internal static void ClearClientTarget()
@@ -154,8 +138,6 @@ namespace SephiriaTogether
             // new one. Keep the selected room metadata through that handoff.
             if (SteamInvitation.waitForExternalConnect && !string.IsNullOrEmpty(remoteRoomScope))
             {
-                authenticationTargetSent = false;
-                legacyAuthenticationRetryAttempted = false;
                 clientNoticeReceived = false;
                 clientProtocolConfirmed = false;
                 return;
@@ -164,31 +146,6 @@ namespace SephiriaTogether
         }
 
         internal static void AbortClientJoin() => ResetClientRoomState();
-
-        internal static bool TryRetryLegacyAuthentication(
-            HorayNetworkAuthenticator.VersionResponseMessage message)
-        {
-            if (message.success || !legacyAuthenticationRetryAvailable ||
-                legacyAuthenticationRetryAttempted ||
-                !remoteRoomScope.StartsWith("ip:", StringComparison.Ordinal) ||
-                !string.Equals(message.errorMessage, "DIFFERENT_VERSION",
-                    StringComparison.OrdinalIgnoreCase) ||
-                !NetworkClient.active || NetworkClient.connection == null)
-                return false;
-
-            legacyAuthenticationRetryAttempted = true;
-            NetworkClient.Send(new HorayNetworkAuthenticator.VersionMessage
-            {
-                version = LegacyGameVersion,
-                playerGuid = HorayNetworkAuthenticator.GetLastRejoinGuid()
-            });
-            Plugin.LogInfo($"Retrying IP authentication for legacy game {LegacyGameVersion}: " +
-                           $"localGame={Application.version}, scope={remoteRoomScope}.");
-            ShowMismatch(LegacyGameVersion,
-                string.IsNullOrEmpty(remoteModVersion) ? LegacyModVersion : remoteModVersion,
-                remoteRoomScope);
-            return true;
-        }
 
         internal static void WarnLanRoom(string gameVersion, string modVersion, string address, ushort port)
         {
@@ -233,33 +190,11 @@ namespace SephiriaTogether
         internal static bool CanAttemptProtocolHandshake()
         {
             // Mirror is configured by the game with exceptionsDisconnect=false.
-            // Probe every remote session so a newer client can detect an older
-            // or unmodded host without making custom features a prerequisite for
-            // joining. Feature messages remain gated until the notice confirms
-            // an identical game and Mod protocol.
+            // Probe every remote session so a Modded client can detect an
+            // unmodded or differently Modded host without making custom features
+            // a prerequisite for joining. Feature messages remain gated until
+            // the notice confirms an identical game and Mod protocol.
             return !NetworkServer.active;
-        }
-
-        internal static bool SendTargetAuthenticationIfNeeded()
-        {
-            if (NetworkServer.active) return false;
-            if (authenticationTargetSent) return true;
-            if (string.IsNullOrEmpty(authenticationTargetGameVersion)) return false;
-            string targetVersion = string.IsNullOrEmpty(authenticationTargetGameVersion)
-                ? Application.version
-                : authenticationTargetGameVersion;
-            if (string.Equals(targetVersion, Application.version, StringComparison.OrdinalIgnoreCase))
-                return false;
-            if (!NetworkClient.active || NetworkClient.connection == null) return false;
-            NetworkClient.Send(new HorayNetworkAuthenticator.VersionMessage
-            {
-                version = targetVersion,
-                playerGuid = HorayNetworkAuthenticator.GetLastRejoinGuid()
-            });
-            Plugin.LogInfo($"Version authentication sent: localGame={Application.version}, " +
-                           $"targetGame={targetVersion}, scope={CurrentClientRoomScope()}.");
-            authenticationTargetSent = true;
-            return true;
         }
 
         internal static void InspectLobby(LobbyData lobby)
@@ -283,13 +218,22 @@ namespace SephiriaTogether
             }
         }
 
-        private static void ShowMismatch(string remoteGameVersion, string remoteModVersion, string scope = null)
+        internal static string FormatVersionMismatch(string remoteGameVersion, string remoteModVersion)
         {
-            string message = string.Format(MenuText.Get("VersionMismatchWarning"),
-                Application.version,
-                string.IsNullOrEmpty(remoteGameVersion) ? MenuText.Get("VersionNotInstalled") : remoteGameVersion,
+            if (!string.IsNullOrEmpty(remoteGameVersion) &&
+                !string.Equals(remoteGameVersion, Application.version, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.Format(MenuText.Get("GameVersionMismatchWarning"),
+                    Application.version, remoteGameVersion);
+            }
+            return string.Format(MenuText.Get("ModVersionMismatchWarning"),
                 Plugin.PluginVersion,
                 string.IsNullOrEmpty(remoteModVersion) ? MenuText.Get("VersionNotInstalled") : remoteModVersion);
+        }
+
+        private static void ShowMismatch(string remoteGameVersion, string remoteModVersion, string scope = null)
+        {
+            string message = FormatVersionMismatch(remoteGameVersion, remoteModVersion);
             scope = string.IsNullOrEmpty(scope) ? CurrentClientRoomScope() : scope;
             bool survivesNoLobby = scope.StartsWith("ip:", StringComparison.Ordinal) ||
                                    scope.StartsWith("eos:", StringComparison.Ordinal) || scope == "host-room";
@@ -334,9 +278,9 @@ namespace SephiriaTogether
             if (connection == null) return;
             HelloConnections.Add(connection.connectionId);
             RemoteModVersions[connection.connectionId] = message.modVersion ?? "";
-            // The native authentication version may be the host's version when
-            // a client had to bypass the stock game-version check. The custom
-            // hello carries the client's actual version for diagnostics.
+            // Native authentication already enforces the exact game version.
+            // The custom hello still carries the client's report for warnings
+            // and for gating custom features on an identical Mod protocol.
             string remoteGameVersion = message.gameVersion ?? "";
             if (string.IsNullOrEmpty(remoteGameVersion) &&
                 RemoteGameVersions.TryGetValue(connection.connectionId, out string reported))
@@ -437,43 +381,14 @@ namespace SephiriaTogether
 
         private static void ResetClientRoomState()
         {
-            authenticationTargetGameVersion = "";
             remoteGameVersion = "";
             remoteModVersion = "";
             remoteRoomScope = "";
-            authenticationTargetSent = false;
-            legacyAuthenticationRetryAvailable = false;
-            legacyAuthenticationRetryAttempted = false;
             clientNoticeReceived = false;
             clientProtocolConfirmed = false;
             remoteModMetadataAuthoritative = false;
             VersionReminder.Clear();
         }
-    }
-
-    [HarmonyPatch(typeof(LobbyData), "get_GameVersion")]
-    internal static class LobbyGameVersionCompatibilityPatch
-    {
-        private static bool Prefix(ref string __result)
-        {
-            // Preserve the raw metadata for VersionCompatibility, but make the
-            // stock lobby UI and join validation non-blocking across game versions.
-            __result = Application.version;
-            return false;
-        }
-    }
-
-    [HarmonyPatch(typeof(HorayNetworkAuthenticator), nameof(HorayNetworkAuthenticator.OnClientAuthenticate))]
-    internal static class ClientAuthenticationTargetVersionPatch
-    {
-        private static bool Prefix() => !VersionCompatibility.SendTargetAuthenticationIfNeeded();
-    }
-
-    [HarmonyPatch(typeof(HorayNetworkAuthenticator), "OnClientVersionResponseMessage")]
-    internal static class ClientVersionResponseCompatibilityPatch
-    {
-        private static bool Prefix(HorayNetworkAuthenticator.VersionResponseMessage message) =>
-            !VersionCompatibility.TryRetryLegacyAuthentication(message);
     }
 
     [HarmonyPatch(typeof(UI_MultiplayerPanel), nameof(UI_MultiplayerPanel.OnOpened))]
@@ -532,52 +447,24 @@ namespace SephiriaTogether
         private static void Prefix() => VersionCompatibility.PrepareCurrentSteamLobbyIfNeeded();
     }
 
-    [HarmonyPatch(typeof(UI_MultiplayerPanel_E), "HandleFound")]
-    [HarmonyPriority(Priority.First)]
-    internal static class EosLobbyFoundVersionCompatibilityPatch
-    {
-        private static bool Prefix(UI_MultiplayerPanel_E __instance, List<EOSLobbyInfo> lobbies)
-        {
-            if (lobbies == null) return false;
-            foreach (EOSLobbyInfo lobby in lobbies)
-            {
-                if (lobby == null || __instance.lobbyElementPrefab == null || __instance.lobbyListZone == null) continue;
-                UI_MultiplayerLobbyElement_E element =
-                    UnityEngine.Object.Instantiate(__instance.lobbyElementPrefab, __instance.lobbyListZone);
-                element.SetLobby(lobby, __instance);
-                __instance.lobbyElements.Add(element);
-            }
-            return false;
-        }
-    }
-
     [HarmonyPatch(typeof(UI_MultiplayerPanel_E), "OnJoinButton", new[] { typeof(EOSLobbyInfo) })]
     [HarmonyPriority(Priority.First)]
     internal static class EosLobbyJoinVersionCompatibilityPatch
     {
-        private static void Prefix(EOSLobbyInfo info, out string __state)
-        {
-            __state = info?.version ?? "";
-            VersionCompatibility.PrepareEosJoin(info);
-        }
-
-        private static void Postfix(EOSLobbyInfo info, string __state)
-        {
-            if (info != null) info.version = __state;
-        }
+        private static void Prefix(EOSLobbyInfo info) => VersionCompatibility.PrepareEosJoin(info);
     }
 
     [HarmonyPatch(typeof(HorayNetworkAuthenticator), "OnServerVersionMessage")]
-    [HarmonyPriority(Priority.Last)]
+    [HarmonyPriority(Priority.First)]
     internal static class ServerVersionCompatibilityPatch
     {
         private static void Prefix(NetworkConnectionToClient conn,
-            ref HorayNetworkAuthenticator.VersionMessage message)
+            HorayNetworkAuthenticator.VersionMessage message)
         {
+            // Record only. The stock authenticator now enforces the exact game
+            // version because updated builds change native network serialization
+            // and command hashes; spoofing the version would desync the session.
             VersionCompatibility.RecordGameVersion(conn, message.version);
-            // The stock authenticator rejects mismatched game versions before
-            // the normal lobby admission and rejoin logic runs.
-            message.version = Application.version;
         }
     }
 

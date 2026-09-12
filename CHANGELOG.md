@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.9.5
+
+- Rebuild for the Sephiria 1.0.31 game update and refresh the decompilation cache to the new game assembly.
+- Require matching game versions again. The updated game changes native Mirror serialization and command hashes, so the previous game-version spoof could produce desyncs; mismatched game builds are now rejected by the game's native authentication. Differing Mod versions can still join with a warning.
+- Use the game's new world-map gather-distance argument for the "no gathering required" stage transition instead of temporarily moving living player transforms.
+- Split the version warning into a blocking game-version notice and a non-blocking Mod-version notice.
+- Fix anti-cheat letting guests take sapphire-refreshed merchant stock for free: the native replenishment purchase pays with a client `CmdGiveMoney` to the merchant, so that payment is now allowed while direct money changes and player-to-player money commands stay blocked.
+
 ## 3.9.4
 
 - Preserve a valid saved Fruit Skewer for reconnecting players while restoring the client's uploaded selection when the run slot has lost its Fruit Skewer state.
