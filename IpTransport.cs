@@ -1,11 +1,15 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Reflection.Emit;
 using HarmonyLib;
 using HeathenEngineering.SteamworksIntegration;
 using HeathenEngineering.SteamworksIntegration.API;
 using Mirror;
 using Steamworks;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace SephiriaTogether
 {
@@ -15,8 +19,13 @@ namespace SephiriaTogether
         private static bool offlineEnvironment;
         private static bool environmentKnown;
         private static Transport previousTransport;
-        private static bool installLogged;
+        private static NetworkManager trackedManager;
+        private static ushort? clientTargetPort;
+        private static bool applyingSettings;
+        private static bool openSettingsOnTitle;
+        private static float nextEnvironmentCheck;
         private static bool activeTransportWarningLogged;
+        private static string applyError;
 
         internal static bool IsActive => active && NetworkManager.singleton != null &&
                                          NetworkManager.singleton.transport is TelepathyTransport;
@@ -31,13 +40,27 @@ namespace SephiriaTogether
                     : Plugin.directModeEnabled != null && Plugin.directModeEnabled.Value;
             }
         }
-        // A setting change is only allowed to select IP before a network session starts.
-        // Once a session is active, the installed transport is the source of truth.
+        // Preferences can be edited during a session; only the installed transport
+        // controls the current UI. Changes are applied after the session ends.
         internal static bool ShouldUseIpForUi => IsActive ||
                                                  (ShouldUseIp && !NetworkServer.active && !NetworkClient.active);
-        internal static bool CanChangeSettings =>
-            !NetworkServer.active && !NetworkClient.active &&
-            (DungeonManager.Instance == null || !DungeonManager.Instance.isRunStarted);
+        internal static bool CanApplySettings => SessionTransportPolicy.CanApply(NetworkServer.active,
+            NetworkClient.active, SteamInvitation.waitForExternalConnect,
+            DungeonManager.Instance != null && DungeonManager.Instance.isRunStarted);
+        internal static bool CanEditSettings => !SteamInvitation.waitForExternalConnect && !SaveManagement.IsBusy;
+        internal static string ApplyError => applyError;
+        internal static bool HasPendingSettings
+        {
+            get
+            {
+                NetworkManager manager = NetworkManager.singleton;
+                if (manager == null || !environmentKnown) return ShouldUseIp;
+                return DecideChange(manager, CanApplySettings, DesiredPortForCurrentState) != SessionTransportChange.None;
+            }
+        }
+        // A client's remote port is not its saved port for future hosting.
+        private static ushort DesiredPortForCurrentState => SessionTransportPolicy.ComparisonPort(
+            NetworkServer.active, NetworkClient.active, ConfiguredPort, ActivePort);
         internal static ushort ConfiguredPort => Plugin.directPort != null
             ? (ushort)Mathf.Clamp(Plugin.directPort.Value, 1, 65535)
             : (ushort)7777;
@@ -52,35 +75,47 @@ namespace SephiriaTogether
 
         internal static void EnsureInstalled()
         {
-            if (IsActive)
-            {
-                if (CanChangeSettings && NetworkManager.singleton.transport is TelepathyTransport)
-                {
-                    NetworkManager.singleton.maxConnections = PlayerLimit.CurrentLimit;
-                }
-                return;
-            }
+            if (applyingSettings) return;
             if (NetworkManager.singleton is HorayNetworkManager manager)
             {
-                if (!environmentKnown || ShouldUseIp) Install(manager);
+                Install(manager);
+                if (openSettingsOnTitle && CanApplySettings && UIManager.Instance != null &&
+                    SceneManager.GetActiveScene().name == manager.titleSceneName)
+                {
+                    openSettingsOnTitle = false;
+                    CoopMenu.OpenNetworkSettings();
+                }
             }
         }
 
         internal static void ApplySettingsFromMenu()
         {
-            NetworkManager manager = NetworkManager.singleton;
-            if (manager == null || !CanChangeSettings) return;
-            offlineEnvironment = !IsSteamLoggedOn();
-            environmentKnown = true;
-            if (!ShouldUseIp)
+            if (!environmentKnown) RefreshEnvironment(force: true);
+            EnsureInstalled();
+            Plugin.LogInfo($"Network preferences saved: requestedIp={ShouldUseIp}, hostPort={ConfiguredPort}, " +
+                           $"currentIp={IsActive}, pending={HasPendingSettings}.");
+        }
+
+        internal static void ReturnToTitleForSettings()
+        {
+            if (!CanEditSettings) return;
+            Plugin.SaveSettings();
+            if (CanApplySettings)
             {
-                Deactivate(manager);
+                ApplySettingsFromMenu();
                 return;
             }
-            Activate(manager);
-            manager.maxConnections = PlayerLimit.CurrentLimit;
-            ApplyOpenPanelMode();
-            Plugin.LogInfo($"IP transport applied from menu: port={ConfiguredPort}, offline={offlineEnvironment}.");
+            UI_PausePanel pause = UIManager.Instance?.GetElement<UI_PausePanel>();
+            if (pause == null)
+            {
+                ShowMessage(MenuText.Get("IpReturnUnavailable"));
+                return;
+            }
+            // Keep the original confirmation and client dungeon-settlement flow.
+            // No forced save, transport swap, or process restart while connected.
+            openSettingsOnTitle = true;
+            CoopMenu.Close();
+            pause.GoToTitle();
         }
 
         internal static void ApplyLobbyUiMode(UI_MultiplayerPanel panel)
@@ -103,46 +138,95 @@ namespace SephiriaTogether
 
         internal static void Install(HorayNetworkManager manager)
         {
-            if (manager == null) return;
+            if (manager == null || applyingSettings) return;
+            ObserveManager(manager);
+            RefreshEnvironment();
+            Reconcile(manager, CanApplySettings, DesiredPortForCurrentState);
+        }
+
+        private static void ObserveManager(NetworkManager manager)
+        {
+            if (trackedManager != manager)
+            {
+                trackedManager = manager;
+                previousTransport = null;
+                activeTransportWarningLogged = false;
+            }
+            // Remember the original on late Workshop activation too, without
+            // mutating an active session. Never reuse another manager's transport.
+            if (manager.transport != null && !(manager.transport is TelepathyTransport))
+                previousTransport = manager.transport;
+            active = manager.transport is TelepathyTransport;
+        }
+
+        private static void RefreshEnvironment(bool force = false)
+        {
+            if (!force && environmentKnown &&
+                (NetworkServer.active || NetworkClient.active || Time.realtimeSinceStartup < nextEnvironmentCheck)) return;
             offlineEnvironment = !IsSteamLoggedOn();
             environmentKnown = true;
-            bool networkActive = NetworkServer.active || NetworkClient.active;
-            if (networkActive)
+            nextEnvironmentCheck = Time.realtimeSinceStartup + 1f;
+        }
+
+        private static SessionTransportChange DecideChange(NetworkManager manager, bool canApply, ushort port)
+        {
+            TelepathyTransport current = manager.transport as TelepathyTransport;
+            return SessionTransportPolicy.Decide(ShouldUseIp, port, current != null,
+                current != null ? current.port : (ushort)0, canApply, previousTransport != null);
+        }
+
+        private static bool Reconcile(NetworkManager manager, bool canApply, ushort port)
+        {
+            SessionTransportChange change = DecideChange(manager, canApply, port);
+            if (change == SessionTransportChange.None)
             {
-                if (manager.transport is TelepathyTransport)
-                {
-                    active = true;
-                    return;
-                }
+                applyError = null;
+                activeTransportWarningLogged = false;
+                return true;
+            }
+            if (change == SessionTransportChange.WaitForSessionEnd)
+            {
+                applyError = null;
                 if (!activeTransportWarningLogged)
                 {
                     activeTransportWarningLogged = true;
-                    Plugin.LogInfo("IP transport cannot replace the active network transport until the next launch.");
+                    Plugin.LogInfo("Network preferences are pending. Return to the title after ending this session to apply them; no process restart is needed.");
                 }
-                return;
+                return false;
             }
-            activeTransportWarningLogged = false;
-            if (!ShouldUseIp)
+            if (change == SessionTransportChange.NativeTransportUnavailable)
             {
-                active = false;
-                return;
+                applyError = MenuText.Get("IpNativeUnavailable");
+                return false;
             }
-            Activate(manager);
-            ApplyOpenPanelMode();
-            if (!installLogged)
+            applyingSettings = true;
+            try
             {
-                installLogged = true;
-                Plugin.LogInfo($"IP transport installed at startup: port={ConfiguredPort}, offline={offlineEnvironment}.");
+                if (change == SessionTransportChange.RestoreNative)
+                {
+                    if (!Deactivate(manager)) return false;
+                }
+                else
+                {
+                    Activate(manager, port);
+                    ApplyOpenPanelMode();
+                }
+                applyError = null;
+                activeTransportWarningLogged = false;
+                manager.maxConnections = PlayerLimit.CurrentLimit;
+                Plugin.LogInfo($"Network preferences applied while idle: ip={IsActive}, port={ActivePort}, offline={offlineEnvironment}.");
+                return true;
             }
+            finally { applyingSettings = false; }
         }
 
-        private static void Activate(NetworkManager manager)
+        private static void Activate(NetworkManager manager, ushort port)
         {
             TelepathyTransport transport = manager.GetComponent<TelepathyTransport>();
             if (transport == null) transport = manager.gameObject.AddComponent<TelepathyTransport>();
             if (!(manager.transport is TelepathyTransport) && manager.transport != null)
                 previousTransport = manager.transport;
-            transport.port = ConfiguredPort;
+            transport.port = port;
             transport.enabled = true;
             if (previousTransport != null && previousTransport != transport) previousTransport.enabled = false;
             manager.transport = transport;
@@ -151,17 +235,19 @@ namespace SephiriaTogether
             activeTransportWarningLogged = false;
         }
 
-        private static void Deactivate(NetworkManager manager)
+        private static bool Deactivate(NetworkManager manager)
         {
+            if (previousTransport == null)
+            {
+                applyError = MenuText.Get("IpNativeUnavailable");
+                return false;
+            }
             active = false;
             TelepathyTransport transport = manager.GetComponent<TelepathyTransport>();
             if (transport != null) transport.enabled = false;
-            if (previousTransport != null)
-            {
-                previousTransport.enabled = true;
-                manager.transport = previousTransport;
-                Transport.active = previousTransport;
-            }
+            previousTransport.enabled = true;
+            manager.transport = previousTransport;
+            Transport.active = previousTransport;
             UI_MultiplayerPanel panel = UIManager.Instance?.GetElement<UI_MultiplayerPanel>();
             if (panel != null)
             {
@@ -171,6 +257,17 @@ namespace SephiriaTogether
                 if (panel.enteredLobbyGroup != null) panel.enteredLobbyGroup.SetActive(false);
                 if (panel.IsOpened) panel.RefreshLobbyList();
             }
+            return true;
+        }
+
+        internal static void Shutdown()
+        {
+            openSettingsOnTitle = false;
+            clientTargetPort = null;
+            // An active session owns its transport until it stops; do not tear
+            // its socket out from under Mirror when the native mod unloads.
+            if (CanApplySettings && NetworkManager.singleton != null && active)
+                Deactivate(NetworkManager.singleton);
         }
 
         private static void ApplyOpenPanelMode()
@@ -202,6 +299,7 @@ namespace SephiriaTogether
         {
             EnsureInstalled();
             if (!ShouldUseIp) return false;
+            if (WorkshopLobbyModsUI.BlockLocalModJoining()) return true;
             if (!IsActive)
             {
                 ShowMessage(MenuText.Get("IpRestartRequired"));
@@ -213,7 +311,7 @@ namespace SephiriaTogether
                 ShowMessage(MenuText.Get("IpInvalidAddress"));
                 return true;
             }
-            if (NetworkManager.singleton.transport is TelepathyTransport telepathy) telepathy.port = port;
+            clientTargetPort = port;
             if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) host = "127.0.0.1";
             if (!VersionCompatibility.IsPreparedForIp(host, port))
                 VersionCompatibility.PrepareIpJoin("", "", host, port);
@@ -223,38 +321,56 @@ namespace SephiriaTogether
 
         internal static bool PrepareForNetworkStart(NetworkManager manager)
         {
-            EnsureInstalled();
-            if (!ShouldUseIp)
+            if (manager == null) return false;
+            if (NetworkServer.active || NetworkClient.active) return true;
+            ObserveManager(manager);
+            RefreshEnvironment(force: true);
+            clientTargetPort = null;
+            bool canApply = SessionTransportPolicy.CanApply(NetworkServer.active, NetworkClient.active,
+                SteamInvitation.waitForExternalConnect, false, startingSession: true);
+            if (!Reconcile(manager, canApply, ConfiguredPort))
             {
-                return true;
-            }
-            if (!IsActive || manager == null || !(manager.transport is TelepathyTransport telepathy))
-            {
-                ShowMessage(MenuText.Get("IpRestartRequired"));
+                ShowMessage(applyError ?? MenuText.Get("IpRestartRequired"));
                 return false;
             }
-            // A manual IP join may temporarily use a different client port. Hosts always
-            // bind the configured server port when a new session starts.
-            telepathy.port = ConfiguredPort;
+            // A native host may start while the native scene transition flag is
+            // set. This explicit boundary is safe because both network sides are idle.
             manager.maxConnections = PlayerLimit.CurrentLimit;
-            Transport.active = telepathy;
+            Transport.active = manager.transport;
             return true;
         }
 
         internal static bool PrepareForClientStart(NetworkManager manager)
         {
-            if (NetworkClient.active) return true;
-            EnsureInstalled();
-            if (ShouldUseIp && !IsActive)
+            if (manager == null) return false;
+            if (NetworkClient.active || NetworkServer.active) return true;
+            ObserveManager(manager);
+            RefreshEnvironment(force: true);
+            if (!SessionTransportPolicy.ClientModeMatchesTarget(ShouldUseIp, clientTargetPort.HasValue))
             {
-                ShowMessage(MenuText.Get("IpRestartRequired"));
+                // Steam/EOS join addresses are not TCP endpoints. A queued IP
+                // preference must never reinterpret a native lobby's address.
+                bool needsIpTarget = ShouldUseIp;
+                clientTargetPort = null;
+                ShowMessage(MenuText.Get(needsIpTarget ? "IpExplicitTargetRequired" : "IpRestartRequired"));
                 return false;
             }
-            return true;
+            bool canApply = SessionTransportPolicy.CanApply(NetworkServer.active, NetworkClient.active,
+                SteamInvitation.waitForExternalConnect, false, startingSession: true);
+            if (Reconcile(manager, canApply, SessionTransportPolicy.ClientPort(ConfiguredPort, clientTargetPort)))
+            {
+                Transport.active = manager.transport;
+                return true;
+            }
+            ShowMessage(applyError ?? MenuText.Get("IpRestartRequired"));
+            return false;
         }
+
+        internal static void ClearClientPort() => clientTargetPort = null;
 
         internal static void PromptJoinFromPanel()
         {
+            if (WorkshopLobbyModsUI.BlockLocalModJoining()) return;
             UI_MessageBox_InputYesNo dialog = UIManager.Instance?.GetElement<UI_MessageBox_InputYesNo>();
             if (dialog == null) return;
             dialog.Open(MenuText.Get("IpJoinPrompt"), JoinFromPanelText, null, "", "IP or IP:Port", true, 64);
@@ -279,7 +395,13 @@ namespace SephiriaTogether
 
         private static IEnumerator JoinRoomCoroutine(string address, ushort port)
         {
-            if (!ShouldUseIp || SteamInvitation.waitForExternalConnect) yield break;
+            if (SteamInvitation.waitForExternalConnect) yield break;
+            if (!ShouldUseIp)
+            {
+                ShowMessage(MenuText.Get("IpLockedInSession"));
+                yield break;
+            }
+            if (WorkshopLobbyModsUI.BlockLocalModJoining()) yield break;
             EnsureInstalled();
             if (!IsActive)
             {
@@ -315,21 +437,31 @@ namespace SephiriaTogether
             SaveManager.CreateNewTMP(profile);
             SaveManager.ApplyPostLoadSaveFixes();
             yield return new WaitForSeconds(0.2f);
+            // Match the new native join lifecycle before creating client objects.
+            yield return Traverse.Create(typeof(WorkshopModManager))
+                .Method("PrepareForActivation").GetValue<IEnumerator>();
             manager = NetworkManager.singleton;
-            if (manager == null || !(manager.transport is TelepathyTransport telepathy))
+            if (manager == null || !(manager.transport is TelepathyTransport) || NetworkServer.active || NetworkClient.active)
             {
                 SteamInvitation.waitForExternalConnect = false;
                 VersionCompatibility.AbortClientJoin();
                 IpLobby.ResetClientPanel();
                 yield break;
             }
-            telepathy.port = port;
-            Transport.active = telepathy;
+            clientTargetPort = port;
             if (!VersionCompatibility.IsPreparedForIp(address, port))
                 VersionCompatibility.PrepareIpJoin("", "", address, port);
             manager.networkAddress = address;
             (manager as HorayNetworkManager)?.ShowConnectingScreen();
             manager.StartClient();
+            if (!NetworkClient.active)
+            {
+                clientTargetPort = null;
+                SteamInvitation.waitForExternalConnect = false;
+                VersionCompatibility.AbortClientJoin();
+                IpLobby.ResetClientPanel();
+                yield break;
+            }
             IpLobby.MarkJoined(address, port);
             yield return new WaitForSeconds(2f);
             SteamInvitation.waitForExternalConnect = false;
@@ -415,6 +547,38 @@ namespace SephiriaTogether
     internal static class IpPanelCreateEnsurePatch
     {
         private static void Prefix() => IpTransport.EnsureInstalled();
+
+        private static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            MethodInfo ready = AccessTools.Method(typeof(UI_MultiplayerPanel), "IsSteamLobbyReady");
+            MethodInfo includeIp = AccessTools.Method(typeof(IpPanelCreateEnsurePatch), nameof(CanCreateRoom));
+            int matches = 0;
+            foreach (CodeInstruction instruction in instructions)
+            {
+                yield return instruction;
+                if (instruction.Calls(ready))
+                {
+                    yield return new CodeInstruction(OpCodes.Call, includeIp);
+                    matches++;
+                }
+            }
+            if (matches != 1)
+                throw new InvalidOperationException("Lobby creation readiness check changed.");
+        }
+
+        private static bool CanCreateRoom(bool steamReady) => steamReady || IpTransport.IsActive;
+    }
+
+    [HarmonyPatch(typeof(UI_MultiplayerPanel), "ApplySteamDependentButtons")]
+    internal static class IpPanelButtonsPatch
+    {
+        private static void Postfix(UI_MultiplayerPanel __instance)
+        {
+            if (!IpTransport.IsActive) return;
+            if (__instance.joinGameButton != null) __instance.joinGameButton.interactable = true;
+            if (__instance.createGameButton != null) __instance.createGameButton.interactable = true;
+            if (__instance.steamNotInitializedNotice != null) __instance.steamNotInitializedNotice.SetActive(false);
+        }
     }
 
     [HarmonyPatch(typeof(UI_MultiplayerPanel), nameof(UI_MultiplayerPanel.RefreshLobbyList))]

@@ -1,5 +1,7 @@
 # Third-Party Notices
 
+The native Workshop package contains only the mod DLL, metadata, preview and documentation. It references the game's bundled Harmony, Unity, Mirror and Steamworks assemblies without redistributing them. Its preview image was generated for this project.
+
 The optional beginner bundle includes the official, unmodified Windows x64 distribution of BepInEx 5.4.23.5, with Sephiria Together added as a separate plugin.
 
 - Project: BepInEx

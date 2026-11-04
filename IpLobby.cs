@@ -57,6 +57,15 @@ namespace SephiriaTogether
                 return;
             }
 
+            if (WorkshopLobbyModsUI.BlockLocalModHosting()) return;
+            CustomGameEntity gameMode = Traverse.Create(panel).Property("SelectedGameMode").GetValue<CustomGameEntity>();
+            if (gameMode != null && !CustomGameLauncher.CanStart(gameMode, multiplayer: true, out string reason))
+            {
+                Plugin.LogInfo($"IP custom game unavailable: mode={gameMode.key}, reason={reason}.");
+                IpTransport.ShowMessage(panel.customGameUnavailableMessage.ToString());
+                return;
+            }
+
             string requestedName = panel.lobbyNameInput != null ? panel.lobbyNameInput.text : "";
             requestedName = (requestedName ?? "").Replace('\r', ' ').Replace('\n', ' ').Trim();
             if (requestedName.Length == 0 || string.Equals(requestedName, "ERR", StringComparison.OrdinalIgnoreCase))
@@ -67,8 +76,9 @@ namespace SephiriaTogether
             roomName = requestedName;
             maxPlayers = panel.memberBox != null ? panel.memberBox.CurrentSelection + 2 : PlayerLimit.CurrentLimit;
             maxPlayers = Mathf.Clamp(maxPlayers, 2, PlayerLimit.CurrentLimit);
-            NetworkManager.singleton.maxConnections = maxPlayers;
-            NetworkServer.maxConnections = maxPlayers;
+            if (gameMode != null && gameMode.maxPlayers > 0)
+                maxPlayers = Math.Min(maxPlayers, gameMode.maxPlayers);
+            PlayerLimit.ApplyServerCapacity(maxPlayers);
             lobbyGeneration++;
             restorePendingGeneration = -1;
             created = true;
@@ -79,11 +89,20 @@ namespace SephiriaTogether
                 DungeonManager.Instance.NetworklobbyCreatedSteamId = 0;
             }
 
+            if (gameMode != null && !CustomGameLauncher.StartMultiplayer(gameMode))
+            {
+                Reset();
+                HorayNetworkAuthenticator.allowConnection = false;
+                if (DungeonManager.Instance != null) DungeonManager.Instance.NetworklobbyCreatedPhase = 0;
+                IpTransport.ShowMessage(panel.customGameUnavailableMessage.ToString());
+                return;
+            }
+
             ShowEnteredRoom(panel, roomName, "IP:" + IpTransport.ActivePort);
 
             PlayerAvatar player = Traverse.Create(panel).Field("playerAvatar").GetValue<PlayerAvatar>();
             FloorData lobbyFloor = DungeonManager.Instance?.FindFloorByName("MultiZone");
-            if (player != null && lobbyFloor != null && !DungeonManager.Instance.isRunStarted &&
+            if (gameMode == null && player != null && lobbyFloor != null && !DungeonManager.Instance.isRunStarted &&
                 player.currentFloorGuid != lobbyFloor.guid)
             {
                 DungeonManager.Instance.MoveFloor(player, lobbyFloor.guid, "FLOORSTARTING", 0,
@@ -118,9 +137,14 @@ namespace SephiriaTogether
             ReturnToLobbyScheduled.Clear();
         }
 
-        internal static void MarkRestartPending()
+        internal static void MarkRestartPending(ERestartPlacement placement)
         {
             if (!IsCreated) return;
+            if (placement == ERestartPlacement.FirstStage)
+            {
+                restorePendingGeneration = -1;
+                return;
+            }
             restorePendingGeneration = lobbyGeneration;
             Plugin.LogInfo("IP lobby restore armed for game restart.");
         }
@@ -345,21 +369,24 @@ namespace SephiriaTogether
                 if (connection != null && connection != player.connectionToClient) clients.Add(connection);
             foreach (NetworkConnectionToClient client in clients) client.Disconnect();
 
+            bool returnToStory = CustomGameLauncher.ShouldStopOnLobbyLeave();
             FloorData town = DungeonManager.Instance?.FindFloorByName("TheRabbittown");
-            if (town != null)
+            if (!returnToStory && town != null)
             {
                 DungeonManager.Instance.MoveFloor(player, town.guid, "FLOORSTARTING", 0,
                     recordHistory: false, allowSave: false, keepPrevFloor: false, randomPosition: true);
             }
             Reset();
             VersionReminder.Clear();
-            NetworkServer.maxConnections = PlayerLimit.CurrentLimit;
+            PlayerLimit.ApplyServerCapacity(PlayerLimit.CurrentLimit);
             HorayNetworkAuthenticator.allowConnection = false;
             if (DungeonManager.Instance != null)
             {
                 DungeonManager.Instance.NetworklobbyCreatedPhase = 0;
                 DungeonManager.Instance.NetworklobbyCreatedSteamId = 0;
             }
+            if (returnToStory)
+                CustomGameLauncher.ReturnToMainStory();
             if (panel.searchLobbyGroup != null) panel.searchLobbyGroup.SetActive(true);
             if (panel.createLobbyGroup != null) panel.createLobbyGroup.SetActive(false);
             if (panel.enteredLobbyGroup != null) panel.enteredLobbyGroup.SetActive(false);
@@ -380,6 +407,7 @@ namespace SephiriaTogether
                 IpTransport.ShowMessage(MenuText.Get("IpRestartRequired"));
                 return false;
             }
+            if (WorkshopLobbyModsUI.BlockLocalModHosting()) return false;
             UIManager.Instance.GetElement<UI_MessageBoxHolder>().OpenYesNo(
                 __instance.createLobbyMessageString.ToString(), () => IpLobby.ConfirmCreate(__instance), null);
             return false;
@@ -415,16 +443,18 @@ namespace SephiriaTogether
         }
     }
 
-    [HarmonyPatch(typeof(PlayerSpawner), "Initialize")]
+    [HarmonyPatch(typeof(PlayerSpawner), "Initialize",
+        new[] { typeof(int), typeof(string), typeof(string), typeof(int), typeof(ERestartPlacement) })]
     internal static class IpLobbyInitializePlayerPatch
     {
         private static void Postfix(PlayerSpawner __instance) => IpLobby.ScheduleReturnToLobby(__instance);
     }
 
-    [HarmonyPatch(typeof(HorayNetworkManager), nameof(HorayNetworkManager.RestartGame))]
+    [HarmonyPatch(typeof(HorayNetworkManager), nameof(HorayNetworkManager.RestartGame),
+        new[] { typeof(bool), typeof(int), typeof(string), typeof(ERestartPlacement) })]
     internal static class IpLobbyRestartGamePatch
     {
-        private static void Prefix() => IpLobby.MarkRestartPending();
+        private static void Prefix(ERestartPlacement placement) => IpLobby.MarkRestartPending(placement);
     }
 
     [HarmonyPatch(typeof(HorayNetworkManager), nameof(HorayNetworkManager.OnStopServer))]
@@ -456,6 +486,7 @@ namespace SephiriaTogether
     {
         private static void Postfix()
         {
+            IpTransport.ClearClientPort();
             if (!NetworkServer.active) IpLobby.ResetClientPanel();
         }
     }

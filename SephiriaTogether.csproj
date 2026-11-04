@@ -5,8 +5,10 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>SephiriaTogether</AssemblyName>
+    <AssemblyName Condition="'$(Loader)' == 'Workshop'">SephiriaTogether.Workshop</AssemblyName>
+    <DefineConstants Condition="'$(Loader)' == 'Workshop'">$(DefineConstants);WORKSHOP</DefineConstants>
     <RootNamespace>SephiriaTogether</RootNamespace>
-    <Version>3.9.5</Version>
+    <Version>3.9.9</Version>
     <GameDir Condition="'$(GameDir)' == '' and '$(SEPHIRIA_DIR)' != ''">$(SEPHIRIA_DIR)</GameDir>
   </PropertyGroup>
 
@@ -15,12 +17,13 @@
       <HintPath>$(GameDir)\Sephiria_Data\Managed\Assembly-CSharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
-    <Reference Include="BepInEx">
+    <Reference Include="BepInEx" Condition="'$(Loader)' == 'BepInEx'">
       <HintPath>$(GameDir)\BepInEx\core\BepInEx.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="0Harmony">
-      <HintPath>$(GameDir)\BepInEx\core\0Harmony.dll</HintPath>
+      <HintPath Condition="'$(Loader)' == 'BepInEx'">$(GameDir)\BepInEx\core\0Harmony.dll</HintPath>
+      <HintPath Condition="'$(Loader)' == 'Workshop'">$(GameDir)\Sephiria_Data\Managed\0Harmony.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Mirror">
@@ -89,7 +92,12 @@
     <Error Text="Set SEPHIRIA_DIR or pass -p:GameDir=&quot;path to Sephiria&quot;." />
   </Target>
 
-  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(DeployToGame)' == 'true'">
+  <Target Name="ValidateLoader" BeforeTargets="ResolveReferences">
+    <Error Condition="'$(Loader)' != 'BepInEx' and '$(Loader)' != 'Workshop'" Text="Loader must be BepInEx or Workshop." />
+    <Error Condition="'$(Loader)' == 'Workshop' and '$(DeployToGame)' == 'true'" Text="Use scripts/build-workshop.ps1 for a native Workshop package." />
+  </Target>
+
+  <Target Name="DeployToGame" AfterTargets="Build" Condition="'$(DeployToGame)' == 'true' and '$(Loader)' == 'BepInEx'">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(GameDir)\BepInEx\plugins" />
   </Target>
 </Project>

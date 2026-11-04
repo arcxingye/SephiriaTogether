@@ -4,7 +4,7 @@ obj/
 artifacts/
 
 # Local build configuration
-Directory.Build.props
+# Directory.Build.props contains shared loader/output settings and is versioned.
 *.user
 *.suo
 .vs/

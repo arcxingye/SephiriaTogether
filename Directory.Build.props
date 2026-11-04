@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <Loader Condition="'$(Loader)' == ''">BepInEx</Loader>
+    <BaseIntermediateOutputPath Condition="'$(Loader)' == 'Workshop'">obj\Workshop\</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="'$(Loader)' == 'Workshop'">bin\Workshop\</BaseOutputPath>
+    <DefaultItemExcludes>$(DefaultItemExcludes);bin\**;obj\**;artifacts\**;tests\**</DefaultItemExcludes>
+  </PropertyGroup>
+</Project>

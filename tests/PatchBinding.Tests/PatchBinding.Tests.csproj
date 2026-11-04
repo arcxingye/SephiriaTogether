@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <!-- Actual detour tests use the game's Mono-compatible .NET Framework API.
+         Harmony's patch-state serializer cannot run on .NET 9 (removed BinaryFormatter). -->
+    <TargetFramework Condition="'$(TestFramework)' == ''">net48</TargetFramework>
+    <TargetFramework Condition="'$(TestFramework)' != ''">$(TestFramework)</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <GameDir Condition="'$(GameDir)' == ''">$(SEPHIRIA_DIR)</GameDir>
+    <HarmonyPath Condition="'$(HarmonyPath)' == ''">$(GameDir)\Sephiria_Data\Managed\0Harmony.dll</HarmonyPath>
+    <HarmonyDirectory>$([System.IO.Path]::GetDirectoryName('$(HarmonyPath)'))</HarmonyDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\SteamJoinProgressPatch.cs" Link="Production\SteamJoinProgressPatch.cs" />
+    <Compile Include="..\..\StarCapacityCompatibility.cs" Link="Production\StarCapacityCompatibility.cs" />
+    <Reference Include="0Harmony"><HintPath>$(HarmonyPath)</HintPath></Reference>
+    <Reference Include="MonoMod.Utils" Condition="Exists('$(HarmonyDirectory)\MonoMod.Utils.dll')">
+      <HintPath>$(HarmonyDirectory)\MonoMod.Utils.dll</HintPath>
+    </Reference>
+    <Reference Include="MonoMod.RuntimeDetour" Condition="Exists('$(HarmonyDirectory)\MonoMod.RuntimeDetour.dll')">
+      <HintPath>$(HarmonyDirectory)\MonoMod.RuntimeDetour.dll</HintPath>
+    </Reference>
+    <Reference Include="Mono.Cecil" Condition="Exists('$(HarmonyDirectory)\Mono.Cecil.dll')">
+      <HintPath>$(HarmonyDirectory)\Mono.Cecil.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <Target Name="RequireHarmony" BeforeTargets="ResolveReferences">
+    <Error Condition="!Exists('$(HarmonyPath)')" Text="Pass GameDir or HarmonyPath for the real Harmony assembly used by the test." />
+  </Target>
+</Project>

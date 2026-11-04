@@ -45,38 +45,6 @@ namespace SephiriaTogether
         }
     }
 
-    [HarmonyPatch(typeof(UI_MultiplayerPanel), "OnJoinButton", new[] { typeof(LobbyData) })]
-    internal static class SteamJoinProgressPatch
-    {
-        private static bool Prefix(UI_MultiplayerPanel __instance, LobbyData lobby)
-        {
-            if (!Plugin.allowLowerProgressPlayers.Value)
-            {
-                return true;
-            }
-
-            // The original method also performs version, race and chapter-data validation.
-            // Re-run only the non-progress checks, then join directly.
-            RaceEntity race = DungeonManager.Instance != null ? DungeonManager.Instance.Race : null;
-            if (race != null && race.isMultiplayerBlocked)
-            {
-                return true;
-            }
-
-            FieldInfo networkLobbyField = AccessTools.Field(typeof(UI_MultiplayerPanel), "networkLobby");
-            FieldInfo enterHostRequestField = AccessTools.Field(typeof(UI_MultiplayerPanel), "enterHostRequest");
-            LobbyManager networkLobby = networkLobbyField?.GetValue(__instance) as LobbyManager;
-            if (networkLobbyField == null || enterHostRequestField == null || networkLobby == null)
-            {
-                return true;
-            }
-
-            enterHostRequestField.SetValue(__instance, true);
-            networkLobby.Join(lobby);
-            return false;
-        }
-    }
-
     [HarmonyPatch(typeof(UI_MultiplayerPanel), "HandleCreated")]
     internal static class SteamLobbyCreatedProgressPatch
     {
@@ -87,6 +55,9 @@ namespace SephiriaTogether
 
         private static void Postfix(LobbyData data)
         {
+            // Workshop activation can follow Mirror.Listen. Apply the actual
+            // room cap to the already-listening server, including custom modes.
+            PlayerLimit.ApplyServerCapacity(data.MaxMembers);
             data["pw"] = "open";
             data["SephiriaTogether"] = Plugin.PluginVersion;
             HorayNetworkAuthenticator.allowConnection = true;

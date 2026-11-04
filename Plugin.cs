@@ -1,22 +1,28 @@
 using System;
 using System.Collections;
 using System.Linq;
+#if WORKSHOP
+using SephiriaTogether.WorkshopSupport;
+#else
 using BepInEx;
 using BepInEx.Configuration;
+#endif
 using HarmonyLib;
 using Mirror;
 using UnityEngine;
-using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.Controls;
 
 namespace SephiriaTogether
 {
+#if WORKSHOP
+    public sealed class Plugin : MonoBehaviour
+#else
     [BepInPlugin(PluginGuid, PluginName, PluginVersion)]
     public sealed class Plugin : BaseUnityPlugin
+#endif
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.9.5";
+        public const string PluginVersion = "3.9.9";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> baseEnemyMultiplier;
@@ -41,8 +47,76 @@ namespace SephiriaTogether
         internal static ConfigEntry<bool> directModeEnabled;
         internal static ConfigEntry<int> directPort;
         private Harmony harmony;
+        private bool initialized;
+        private bool ownsRuntime;
+        private const string RuntimeSlot = PluginGuid + ".Runtime";
+
+#if WORKSHOP
+        internal ConfigFile Config { get; private set; }
+        internal ModLogger Logger { get; } = new ModLogger();
+
+        internal void InitializeForWorkshop(ModOptions options)
+        {
+            Config = new ConfigFile(options);
+            InitializeRuntime();
+        }
+#endif
 
         private void Awake()
+        {
+#if !WORKSHOP
+            try { InitializeRuntime(); }
+            catch
+            {
+                enabled = false;
+                throw;
+            }
+#endif
+        }
+
+        private void InitializeRuntime()
+        {
+            if (initialized) return;
+            // The two builds have different assembly names but share one runtime
+            // and Harmony owner. Also catches already-patched older BepInEx builds.
+            lock (AppDomain.CurrentDomain)
+            {
+                object owner = AppDomain.CurrentDomain.GetData(RuntimeSlot);
+                bool legacyRuntime = Resources.FindObjectsOfTypeAll<MonoBehaviour>().Any(component =>
+                    component != null && component != this && component.isActiveAndEnabled &&
+                    component.gameObject.scene.IsValid() && component.GetType().FullName == typeof(Plugin).FullName);
+                if (owner is UnityEngine.Object live && live != null || legacyRuntime || Harmony.HasAnyPatches(PluginGuid))
+                    throw new InvalidOperationException("Sephiria Together is already running. Enable only one of the BepInEx or Workshop builds and restart the game.");
+                AppDomain.CurrentDomain.SetData(RuntimeSlot, this);
+                ownsRuntime = true;
+                Instance = this;
+            }
+            try
+            {
+                BindSettings();
+                harmony = new Harmony(PluginGuid);
+                MidRunJoin.Log = Logger;
+                harmony.PatchAll(typeof(Plugin).Assembly);
+                ApplyPlayerLimit();
+                initialized = true;
+                Logger.LogInfo($"Sephiria Together {PluginVersion} initialized from {GetType().Assembly.GetName().Name}, game={Application.version}.");
+                Logger.LogInfo(
+                    $"Enemy scaling loaded: base x{BaseEnemyMultiplierValue:0.##}, " +
+                    $"+{Math.Max(0f, healthPerExtraPlayer.Value) * 100f:0.##}% original health " +
+                    $"per player above {Math.Max(0, scalingStartsAbove.Value)}. Host only.");
+                Logger.LogInfo(
+                    $"Mid-run join={allowMidRunJoin.Value}, catch-up EXP=100%, " +
+                    $"lower-progress join={allowLowerProgressPlayers.Value}, merchant attacks={allowAttackingMerchants.Value}, " +
+                    $"anti-cheat={antiCheat.Value}.");
+            }
+            catch
+            {
+                ShutdownRuntime();
+                throw;
+            }
+        }
+
+        private void BindSettings()
         {
             playerLimit = Config.Bind(
                 "Multiplayer",
@@ -174,18 +248,6 @@ namespace SephiriaTogether
                     "Maximum multiplier on top of the game's original enemy count.",
                     new AcceptableValueRange<float>(1f, 10f)));
 
-            harmony = new Harmony(PluginGuid);
-            MidRunJoin.Log = Logger;
-            harmony.PatchAll();
-            ApplyPlayerLimit();
-            Logger.LogInfo(
-                $"Enemy scaling loaded: base x{BaseEnemyMultiplierValue:0.##}, " +
-                $"+{Math.Max(0f, healthPerExtraPlayer.Value) * 100f:0.##}% original health " +
-                $"per player above {Math.Max(0, scalingStartsAbove.Value)}. Host only.");
-            Logger.LogInfo(
-                $"Mid-run join={allowMidRunJoin.Value}, catch-up EXP=100%, " +
-                $"lower-progress join={allowLowerProgressPlayers.Value}, merchant attacks={allowAttackingMerchants.Value}, " +
-                $"anti-cheat={antiCheat.Value}.");
         }
 
         internal static int BaselinePlayersValue => scalingStartsAbove.Value;
@@ -204,6 +266,8 @@ namespace SephiriaTogether
         internal static void SetMaximumEnemyCountMultiplier(float value) => maximumEnemyCountMultiplier.Value = Mathf.Clamp(value, 1f, 10f);
         internal static void SaveSettings() => Instance?.Config.Save();
         internal static bool IsShortcutBound(KeyboardShortcut shortcut) => shortcut.MainKey != KeyCode.None;
+        internal static bool IsShortcutDown(KeyboardShortcut shortcut) =>
+            ShortcutInput.IsDown(shortcut.MainKey, shortcut.Modifiers);
         internal static string FormatShortcut(KeyboardShortcut shortcut) =>
             IsShortcutBound(shortcut) ? shortcut.ToString() : MenuText.Get("ShortcutUnbound");
         internal static void LogInfo(string message) =>
@@ -258,22 +322,70 @@ namespace SephiriaTogether
             }
         }
 
-        private void OnDestroy()
+        private void OnDestroy() => ShutdownRuntime();
+
+        internal void ShutdownRuntime()
         {
-            CoopMenu.Close();
-            CoopMenu.ResetClientCompensation();
-            LanRoomDiscovery.StopListening();
-            harmony?.UnpatchSelf();
-            MidRunJoin.ClearConnections();
-            BreathingHealPatch.Clear();
-            AutoRevivePatch.Clear();
-            CatchUpRewards.ClearClientState();
-            VersionReminder.Clear();
-            CatchUpRewards.ClearServerConnectionState();
+            if (!ownsRuntime) return;
+            initialized = false;
+            try
+            {
+                StopAllCoroutines();
+                LanRoomDiscovery.StopListening();
+#if WORKSHOP
+                harmony?.UnpatchAll(PluginGuid);
+#else
+                harmony?.UnpatchSelf();
+#endif
+                UnregisterMessages();
+                CoopMenu.Close();
+                CoopMenu.ResetClientCompensation();
+                MidRunJoin.ClearConnections();
+                MidRunJoin.Log = null;
+                BreathingHealPatch.Clear();
+                AutoRevivePatch.Clear();
+                AntiCheat.Clear();
+                CatchUpRewards.ClearClientState();
+                CatchUpRewards.ClearServerConnectionState();
+                VersionCompatibility.ClearConnections();
+                VersionCompatibility.AbortClientJoin();
+                StartProgressSelection.Clear();
+                RescueAlerts.ClearClient();
+                MoneyTransfer.ClearClient();
+                ThirdPartyCompatibility.Clear();
+                PlayerLimit.ClearServerCapacity();
+                IpTransport.Shutdown();
+            }
+            finally
+            {
+                lock (AppDomain.CurrentDomain)
+                {
+                    if (ReferenceEquals(AppDomain.CurrentDomain.GetData(RuntimeSlot), this))
+                        AppDomain.CurrentDomain.SetData(RuntimeSlot, null);
+                }
+                if (Instance == this) Instance = null;
+                ownsRuntime = false;
+            }
+        }
+
+        private static void UnregisterMessages()
+        {
+            NetworkServer.UnregisterHandler<VersionCompatibilityHelloMessage>();
+            NetworkServer.UnregisterHandler<CatchUpHelloMessage>();
+            NetworkServer.UnregisterHandler<CatchUpClaimMessage>();
+            NetworkServer.UnregisterHandler<FreshPocketItemsMessage>();
+            NetworkServer.UnregisterHandler<RescueRequestMessage>();
+            NetworkServer.UnregisterHandler<MoneyTransferRequest>();
+            NetworkServer.UnregisterHandler<StartProgressReportMessage>();
+            NetworkClient.UnregisterHandler<VersionCompatibilityNoticeMessage>();
+            NetworkClient.UnregisterHandler<CatchUpOfferMessage>();
+            NetworkClient.UnregisterHandler<RescueAlertMessage>();
+            NetworkClient.UnregisterHandler<MoneyTransferResult>();
         }
 
         private void OnGUI()
         {
+            if (!initialized || Instance != this) return;
             RescueAlerts.Draw();
             VersionReminder.Draw();
             CoopMenu.Draw();
@@ -281,6 +393,8 @@ namespace SephiriaTogether
 
         private void Update()
         {
+            if (!initialized || Instance != this) return;
+            ThirdPartyCompatibility.Tick();
             HandleMenuShortcut();
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
@@ -292,79 +406,14 @@ namespace SephiriaTogether
 
         private static void HandleMenuShortcut()
         {
-            if (CoopMenu.IsCapturingShortcut || !IsMenuShortcutDown()) return;
-            LogInfo($"Shortcut pressed: menu={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
+            // A native mod can activate after our OnEnable in the same load
+            // plan. Recheck before using the saved key, not one poll later.
+            if (!CoopMenu.IsCapturingShortcut && IsShortcutDown(menuShortcut.Value))
+                ThirdPartyCompatibility.Tick(force: true);
+            KeyboardShortcut effective = ThirdPartyCompatibility.EffectiveMenuShortcut;
+            if (CoopMenu.IsCapturingShortcut || !IsShortcutDown(effective)) return;
+            LogInfo($"Shortcut pressed: menu={effective}, configured={menuShortcut.Value}, open={CoopMenu.IsOpen}.");
             CoopMenu.Toggle();
-        }
-
-        private static bool IsMenuShortcutDown()
-        {
-            KeyboardShortcut shortcut = menuShortcut.Value;
-            if (shortcut.MainKey == KeyCode.None) return false;
-
-            // BepInEx normally adapts KeyboardShortcut to the active Unity input backend.
-            // This game can report the legacy backend as available while only the new
-            // Input System receives keyboard events, so keep a direct fallback here.
-            try
-            {
-                if (shortcut.IsDown()) return true;
-            }
-            catch (Exception)
-            {
-                // The direct Input System check below remains usable when legacy input is disabled.
-            }
-
-            Keyboard keyboard = Keyboard.current;
-            if (keyboard == null || !TryGetInputKey(shortcut.MainKey, out Key mainKey)) return false;
-            KeyControl mainControl;
-            try
-            {
-                mainControl = keyboard[mainKey];
-            }
-            catch (Exception)
-            {
-                return false;
-            }
-            if (mainControl == null || !mainControl.wasPressedThisFrame) return false;
-
-            foreach (KeyCode modifier in shortcut.Modifiers)
-            {
-                if (!TryGetInputKey(modifier, out Key modifierKey)) return false;
-                try
-                {
-                    if (keyboard[modifierKey] == null || !keyboard[modifierKey].isPressed) return false;
-                }
-                catch (Exception)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        private static bool TryGetInputKey(KeyCode keyCode, out Key key)
-        {
-            string name = keyCode.ToString();
-            if (name.StartsWith("Alpha", StringComparison.Ordinal))
-                name = "Digit" + name.Substring("Alpha".Length);
-            else if (name.StartsWith("Keypad", StringComparison.Ordinal))
-                name = "Numpad" + name.Substring("Keypad".Length);
-
-            switch (name)
-            {
-                case "BackQuote": name = "Backquote"; break;
-                case "LeftControl": name = "LeftCtrl"; break;
-                case "RightControl": name = "RightCtrl"; break;
-                case "LeftCommand":
-                case "LeftWindows":
-                case "LeftApple": name = "LeftMeta"; break;
-                case "RightCommand":
-                case "RightWindows":
-                case "RightApple": name = "RightMeta"; break;
-                case "Print": name = "PrintScreen"; break;
-                case "Return": name = "Enter"; break;
-            }
-            return Enum.TryParse(name, true, out key);
         }
 
         internal static void ScheduleScale(UnitAvatar avatar)
@@ -452,9 +501,23 @@ namespace SephiriaTogether
 
         private void OnEnable()
         {
+            if (!initialized || !ownsRuntime) return;
             Instance = this;
+            ThirdPartyCompatibility.Tick(force: true);
             LanRoomDiscovery.StartListening();
             StartCoroutine(InstallIpTransportWhenReady());
+            // Workshop DLL activation can follow NetworkManager startup. Install
+            // handlers for an already-active session as well as future callbacks.
+            if (NetworkServer.active)
+            {
+                VersionCompatibility.RegisterServerMessages();
+                CatchUpRewards.RegisterServerMessages();
+            }
+            if (NetworkClient.active)
+            {
+                CatchUpRewards.RegisterClientMessages();
+                VersionCompatibility.RegisterClientMessages();
+            }
         }
 
         private IEnumerator InstallIpTransportWhenReady()
@@ -474,6 +537,8 @@ namespace SephiriaTogether
         {
             if (Instance == this)
             {
+                StopAllCoroutines();
+                LanRoomDiscovery.StopListening();
                 Instance = null;
             }
         }

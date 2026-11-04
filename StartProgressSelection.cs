@@ -41,6 +41,7 @@ namespace SephiriaTogether
 
         internal static string Status => status;
         internal static bool CanSelect => NetworkServer.active && DungeonManager.Instance != null &&
+            !ThirdPartyCompatibility.IsStoryProgressRestricted &&
             !DungeonManager.Instance.isRunStarted && SaveManager.CurrentRun != null &&
             !SaveManager.CurrentRun.GetBool("RunStarted", false);
         internal static bool CanApplySelected => CanSelect &&
@@ -70,6 +71,7 @@ namespace SephiriaTogether
             if (Time.unscaledTime < nextReportAt) return;
             nextReportAt = Time.unscaledTime + 3f;
             if (DungeonManager.Instance == null || DungeonManager.Instance.isRunStarted ||
+                ThirdPartyCompatibility.IsStoryProgressRestricted ||
                 SaveManager.CurrentRun == null || SaveManager.CurrentRun.GetBool("RunStarted", false)) return;
             PlayerLocalDataStorage storage = NetworkClient.localPlayer != null
                 ? NetworkClient.localPlayer.GetComponent<PlayerLocalDataStorage>()
@@ -227,7 +229,7 @@ namespace SephiriaTogether
 
         private static void SendReport(PlayerLocalDataStorage storage)
         {
-            if (storage == null || SaveManager.Current == null) return;
+            if (storage == null || SaveManager.Current == null || ThirdPartyCompatibility.IsStoryProgressRestricted) return;
             int progress = Mathf.Clamp(storage.mainQuestProgress, 0, 11);
             int raceId = ResolveLocalRace(storage);
             RaceEntity race = RaceDatabase.FindById(raceId);

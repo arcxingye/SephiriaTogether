@@ -4,6 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine.InputSystem;
+#if WORKSHOP
+using Configuration = SephiriaTogether.WorkshopSupport;
+#else
+using Configuration = BepInEx.Configuration;
+#endif
 
 namespace SephiriaTogether
 {
@@ -96,6 +101,16 @@ namespace SephiriaTogether
             }
         }
 
+        internal static void OpenNetworkSettings()
+        {
+            selectedTab = 0;
+            hostRulesTab = 0;
+            capturingShortcut = 0;
+            directPortText = IpTransport.ConfiguredPort.ToString();
+            scroll = Vector2.zero;
+            if (!open) Toggle();
+        }
+
         internal static void Draw()
         {
             if (!open || !Application.isPlaying) return;
@@ -143,6 +158,12 @@ namespace SephiriaTogether
 
         private static void DrawSelectedPage()
         {
+            if (selectedTab == 2)
+            {
+                BeginSection(MenuText.Get("CompatTitle"));
+                GUILayout.Label(ThirdPartyCompatibility.Describe(), body);
+                EndSection();
+            }
             if (selectedTab == 4)
             {
                 DrawSaveManagerPage();
@@ -171,8 +192,7 @@ namespace SephiriaTogether
                 BeginSection(MenuText.Get("LocalShortcuts"));
                 DrawLocalShortcutSettings();
                 EndSection();
-                if (IpTransport.CanChangeSettings)
-                    DrawDirectConnectControls();
+                DrawDirectConnectControls();
                 BeginSection(MenuText.Get("Multiplayer"));
                 if (JoinProgressBypass.CanCreateLobbyForCurrentRun())
                 {
@@ -218,11 +238,10 @@ namespace SephiriaTogether
                 GUILayout.Label(MenuText.Get("AntiCheatHelp"), muted);
                 EndSection();
 
-                if (!IpTransport.CanChangeSettings)
-                    DrawDirectConnectControls();
-
                 BeginSection(MenuText.Get("StartProgress"));
                 GUILayout.Label(MenuText.Get("StartProgressHelp"), muted);
+                if (ThirdPartyCompatibility.StarSpecialModeActive)
+                    GUILayout.Label(MenuText.Get("CompatStarModes"), body);
                 GUILayout.Label(MenuText.Get("StartProgressManual"), section);
                 List<RaceEntity> manualOptions = StartProgressSelection.GetManualOptions();
                 List<string> manualLabels = new List<string> { MenuText.Get("StartProgressManualUsePlayer") };
@@ -651,8 +670,8 @@ namespace SephiriaTogether
                 PressedModifier(Event.current.alt, KeyCode.LeftAlt, KeyCode.RightAlt),
                 PressedModifier(Event.current.command, KeyCode.LeftCommand, KeyCode.RightCommand)
             }.Where(key => key != KeyCode.None).ToArray();
-            BepInEx.Configuration.KeyboardShortcut shortcut =
-                new BepInEx.Configuration.KeyboardShortcut(Event.current.keyCode, modifiers);
+            Configuration.KeyboardShortcut shortcut =
+                new Configuration.KeyboardShortcut(Event.current.keyCode, modifiers);
             if (capturingShortcut == 1) Plugin.menuShortcut.Value = shortcut;
             else if (capturingShortcut == 2) Plugin.rescueShortcut.Value = shortcut;
             else return;
@@ -683,6 +702,8 @@ namespace SephiriaTogether
         private static void DrawLocalShortcutSettings()
         {
             DrawValue(MenuText.Get("MenuShortcut"), Plugin.FormatShortcut(Plugin.menuShortcut.Value), 180f);
+            string shortcutNotice = ThirdPartyCompatibility.ShortcutNotice();
+            if (!string.IsNullOrEmpty(shortcutNotice)) GUILayout.Label(shortcutNotice, body);
             if (capturingShortcut == 1)
             {
                 GUILayout.Label(MenuText.Get("PressNewShortcut"), muted);
@@ -712,7 +733,7 @@ namespace SephiriaTogether
                 capturingShortcut = 2;
             if (shortcutAction == 1 && Plugin.IsShortcutBound(Plugin.rescueShortcut.Value))
             {
-                Plugin.rescueShortcut.Value = BepInEx.Configuration.KeyboardShortcut.Empty;
+                Plugin.rescueShortcut.Value = Configuration.KeyboardShortcut.Empty;
                 Plugin.SaveSettings();
             }
         }
@@ -729,8 +750,7 @@ namespace SephiriaTogether
                 BeginSection(MenuText.Get("LocalShortcuts"));
                 DrawLocalShortcutSettings();
                 EndSection();
-                if (IpTransport.CanChangeSettings)
-                    DrawDirectConnectControls();
+                DrawDirectConnectControls();
             }
             BeginSection(heading);
             GUILayout.Label(string.IsNullOrEmpty(content) ? MenuText.Get("NoData") : content, body);
@@ -744,19 +764,27 @@ namespace SephiriaTogether
         private static void DrawDirectConnectControls()
         {
             if (string.IsNullOrEmpty(directPortText)) directPortText = IpTransport.ConfiguredPort.ToString();
-            string status = IpTransport.IsActive ? MenuText.Get("IpActiveShort") :
-                IpTransport.ShouldUseIp ? MenuText.Get("IpPendingShort") : MenuText.Get("IpOffShort");
+            bool managerReady = NetworkManager.singleton != null && NetworkManager.singleton.transport != null;
+            string status = !managerReady ? MenuText.Get("IpWaitingManager") :
+                IpTransport.HasPendingSettings ? MenuText.Get("IpPendingShort") : MenuText.Get("IpReadyShort");
             BeginSection(MenuText.Get("DirectConnect"));
             GUILayout.BeginHorizontal();
             GUILayout.Label(status, muted);
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
+            DrawValue(MenuText.Get("IpCurrentMode"), !managerReady ? MenuText.Get("IpWaitingManager") :
+                IpTransport.IsActive ? "IP / TCP : " + IpTransport.ActivePort : MenuText.Get("IpNativeMode"), 180f);
+            DrawValue(MenuText.Get("IpSavedMode"), IpTransport.ShouldUseIp
+                ? "IP / TCP : " + IpTransport.ConfiguredPort : MenuText.Get("IpNativeMode"), 180f);
             GUILayout.Label(MenuText.Get("DirectConnectHelp"), muted);
+#if WORKSHOP
+            GUILayout.Label(MenuText.Get("IpWorkshopLifecycle"), muted);
+#endif
             bool offline = IpTransport.IsOfflineEnvironment;
             if (offline) GUILayout.Label(MenuText.Get("IpOfflineAutomatic"), body);
-            BepInEx.Configuration.ConfigEntry<bool> directMode = offline
+            Configuration.ConfigEntry<bool> directMode = offline
                 ? Plugin.offlineDirectModeEnabled : Plugin.directModeEnabled;
-            GUI.enabled = IpTransport.CanChangeSettings;
+            GUI.enabled = IpTransport.CanEditSettings;
             DrawToggle(MenuText.Get("DirectMode"), directMode.Value,
                 () =>
                 {
@@ -766,7 +794,7 @@ namespace SephiriaTogether
                 });
             GUI.enabled = true;
             GUILayout.Label(MenuText.Get("DirectPort"), body);
-            GUI.enabled = IpTransport.CanChangeSettings;
+            GUI.enabled = IpTransport.CanEditSettings;
             directPortText = GUILayout.TextField(directPortText ?? "", input, GUILayout.Height(30f));
             if (int.TryParse(directPortText, out int parsedPort) && parsedPort >= 1 && parsedPort <= 65535)
             {
@@ -778,8 +806,16 @@ namespace SephiriaTogether
                 }
             }
             GUI.enabled = true;
-            if (!IpTransport.CanChangeSettings)
+            if (!string.IsNullOrEmpty(IpTransport.ApplyError))
+                GUILayout.Label(IpTransport.ApplyError, body);
+            if (IpTransport.HasPendingSettings && !IpTransport.CanApplySettings)
+            {
                 GUILayout.Label(MenuText.Get("IpLockedInSession"), muted);
+                GUI.enabled = IpTransport.CanEditSettings;
+                if (GUILayout.Button(MenuText.Get("IpReturnApply"), primaryButton, GUILayout.Height(38f)))
+                    IpTransport.ReturnToTitleForSettings();
+                GUI.enabled = true;
+            }
             GUILayout.Label(MenuText.Get("IpRestartNotice"), muted);
             EndSection();
         }
@@ -966,7 +1002,7 @@ namespace SephiriaTogether
             }
         }
 
-        private static void DrawToggle(string label, BepInEx.Configuration.ConfigEntry<bool> setting)
+        private static void DrawToggle(string label, Configuration.ConfigEntry<bool> setting)
         {
             DrawToggle(label, setting.Value, () => setting.Value = !setting.Value);
         }

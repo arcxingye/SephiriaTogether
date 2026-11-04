@@ -3,7 +3,11 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+#if WORKSHOP
+using ManualLogSource = SephiriaTogether.WorkshopSupport.ModLogger;
+#else
 using BepInEx.Logging;
+#endif
 using HarmonyLib;
 using HeathenEngineering.SteamworksIntegration;
 using HeathenEngineering.SteamworksIntegration.API;

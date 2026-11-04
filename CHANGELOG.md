@@ -1,5 +1,40 @@
 # Changelog
 
+## 3.9.9
+
+- Add targeted compatibility for Star's SephiriaMod 2.7.4 and Backpack Organizer Workshop 3.0.0.
+- Avoid organizer/menu main-key collisions without changing either saved binding: Together temporarily uses F9 (or the next unused fallback), reports the effective key, and restores its original key when the organizer is inactive.
+- Restore the captured Together room capacity after Star's fixed-50 connection prefix, preserving native admission checks and actual selected/custom-mode caps. Order the limit dropdown patch after Star as well.
+- Recognize Star Boss Rush / Infinite Mode and suspend the story-progress picker while they are active.
+- Add local compatibility diagnostics, read-only organizer-key detection, and actual Harmony ordering regression tests in both registration orders. Native swap/rotate paths remain outside direct-write anti-cheat filtering.
+- Document required all-peer Star installation, organizer duplicate-assembly risks, scoring limitations and outstanding live three-Mod regression cases in `COMPATIBILITY.md`.
+
+## 3.9.8
+
+- Redesign direct-connect settings around session preparation: preferences remain editable in-game, while the panel separately displays the actual transport and saved next-session configuration.
+- Add a return-to-title action that uses the original pause-menu confirmation/guest-settlement path. Pending preferences apply after networking stops; the network settings page reopens at the title. A process restart is not required to apply them.
+- Reconcile saved IP/native mode in both directions and apply port changes only while idle. Scope the captured native transport to its network manager, and keep TCP intact if no native transport can be restored.
+- Preserve explicit client `IP:port` targets across startup and distinguish them from the default port for future hosting. Reject native lobby addresses when an explicit TCP target is required.
+- Synchronize the actual listening server's connection cap on server startup and Steam room creation, including custom-game room caps, covering late Workshop activation.
+- Document the remaining native-loader boundary: each cold launch must first be able to enter a save. Early bootstrap and environments unable to start the base game's session remain BepInEx responsibilities.
+
+## 3.9.7
+
+- Fix native/BepInEx initialization failing before F8 became available: the Steam join transpiler now resolves `LobbyData.get_Item(string)` explicitly instead of looking up the overloaded `Item` property by name.
+- Add an executable transpiler regression fixture with overloaded indexers, checking that Workshop/mode checks and native join instructions remain unchanged.
+
+## 3.9.6
+
+- Adapt to Sephiria 1.1.1 and its Steam Workshop update.
+- Add an independent native Workshop build with a `WorkshopModBase` entry, persistent Unity runtime, game-owned `ModOptions` configuration and the game's bundled Harmony. BepInEx remains available as a separate build.
+- Prevent simultaneous BepInEx/Workshop runtimes, clean up owned patches/message handlers on teardown, and use the active Input System for both menu and rescue shortcuts.
+- Add a local Workshop package builder with metadata, thumbnail and native-entry/dependency/message-layout validation. It preserves upload tickets and does not publish automatically.
+- Bind the IP restart patch to the new four-argument `RestartGame` implementation, avoiding an ambiguous Harmony target during plugin startup. Preserve the game's explicit first-stage placement.
+- Relax only the story-chapter read during Steam admission. The original game-version, Workshop dependency/order/version, custom-game checks, and `JoinLobbyFromUI` connection flow now remain in control.
+- Restore offline IP create/join buttons after the new Steam-readiness checks. IP room creation uses the selected custom game and its player cap, and respects the native local-package hosting/joining restrictions.
+- Disable the main-story progress picker inside custom games so it cannot unintentionally replace their run mode.
+- Add a metadata-only compatibility validator for Harmony targets, injected arguments, reflected members, and the join/create transpiler anchors. Real multiplayer regression testing remains required.
+
 ## 3.9.5
 
 - Rebuild for the Sephiria 1.0.31 game update and refresh the decompilation cache to the new game assembly.

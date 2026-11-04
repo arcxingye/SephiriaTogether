@@ -1,5 +1,7 @@
 # Sephiria Together
 
+[简体中文](README.zh-CN.md) · English
+
 A multiplayer framework for Sephiria. It provides Steam lobbies, TCP/IP rooms for offline environments, configurable capacity, mid-run joining, GUID reconnect, progress-gate bypass, catch-up rewards, and enemy scaling.
 
 The F8 menu follows the game's active language for Simplified Chinese, Traditional Chinese, English, Korean and Japanese. Other languages fall back to English.
@@ -26,14 +28,20 @@ Examples:
 
 Press `F8` to open the configuration panel. The player limit is a numeric field rather than a fixed mode; enter a value from 2 to 250 and apply it before creating the next lobby. The menu also configures progress admission, mid-run joining, catch-up rewards, enemy scaling, saves, transfers, and IP transport settings.
 
+When Backpack Organizer uses the same main key, Together temporarily uses **F9** (or the next free fallback) and displays the effective shortcut. F8 can continue sorting; adding Ctrl to F8 alone is not sufficient because the organizer accepts extra modifiers. Neither saved binding is changed. The Diagnostics tab reports detected compatibility; see [COMPATIBILITY.md](COMPATIBILITY.md) for Star's SephiriaMod and organizer scope.
+
 When lower-progress joining is enabled, a client's earlier chapter no longer blocks the host from starting the next stage. This only bypasses the server's transition check and does not change the client's quest save. The optional **Do not require everyone at the entrance** setting lets the host use the correct stage entrance normally without gathering every living player nearby. It does not guess or directly force-load a stage.
 
 ## Installation
+
+Two loader builds are available: `SephiriaTogether.dll` for BepInEx and `SephiriaTogether.Workshop.dll` for the game's native Workshop loader. Enable one build per game process. Both use the same gameplay features and custom network message layouts.
 
 Download links:
 
 - [Latest Release](https://github.com/arcxingye/SephiriaTogether/releases/latest)
 - [Latest plugin ZIP](https://github.com/arcxingye/SephiriaTogether/releases/latest/download/SephiriaTogether.zip)
+- `SephiriaTogether-3.9.9-Workshop.zip` on the release page is the native local-test/upload package; it extracts into `WorkshopLocal/SephiriaTogether` and is subject to the game's local-package restrictions.
+- `SHA256SUMS-3.9.9.txt` lists checksums for release downloads.
 
 The F8 menu's Diagnostics tab also opens the Release page and plugin ZIP links. The beginner package remains available from the Latest Release page for first-time installations.
 
@@ -44,9 +52,28 @@ If BepInEx 5 is already installed:
 1. Put `SephiriaTogether.dll` in `BepInEx/plugins` on the host.
 2. Start the game once to generate `BepInEx/config/com.sephiriamods.sephiriatogether.cfg`.
 
-See `INSTALL.md` for bilingual beginner instructions.
+See `INSTALL.md` for bilingual beginner instructions, or [README.zh-CN.md](README.zh-CN.md) for the Chinese feature/install overview.
 
-The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients. The host directly grants automatic catch-up and creates vanilla compensation objects such as Anvils, so those objects can be used without the client plugin; install the plugin for the F8 compensation status page, transfers, progress selection, rescue requests, or IP/LAN rooms. Mod version differences do not block joining; a temporary warning is shown for 20 seconds and then disappears. Game versions must match: updated game builds change the native network protocol, so a mismatched game version is rejected by the game's own authentication.
+The native package is produced by `scripts/build-workshop.ps1` under `artifacts/WorkshopLocal/SephiriaTogether`. Put the folder in the game's `WorkshopLocal` directory to inspect/upload it through the official Workshop panel. The DLL contains a public `SephiriaTogether.WorkshopEntry` entry and needs no BepInEx runtime. Native settings are saved through the game's `ModOptions` in device options; they are independent of the BepInEx `.cfg`. Recheck your F8 settings when switching loaders. See the [Workshop guide](https://github.com/arcxingye/SephiriaTogether/blob/main/workshop/README.md) for upload and testing instructions.
+
+**Native-loader timing:** in Sephiria 1.1.1, Workshop DLL activation happens in `GameDataLoader.Awake` when entering a save. F8 is therefore unavailable on the first title screen of a fresh game launch. The Workshop runtime persists after activation; returning to the title does not intentionally destroy it. The BepInEx build initializes at process startup and retains first-title-screen access. The `OnTitleMenuReady` event alone cannot start an unloaded Workshop DLL.
+
+### Session preparation
+
+The two builds share gameplay code, but their startup capabilities differ:
+
+| Capability | BepInEx build | Native Workshop build |
+| --- | --- | --- |
+| F8 on the first title screen | Available at startup | DLL has not loaded yet |
+| In-game rules, scaling and rewards | Shared core | Shared core after activation |
+| Select IP/native mode | Before entry or queue for the next session | Enter a save, configure in F8, return to title to apply, then re-enter |
+| Start when the base game's own session cannot start | Early transport bootstrap is available | Cannot bootstrap code that has not loaded |
+
+Network preferences are editable during play. The panel shows **Current transport** separately from **Saved for next session**; saving a preference never swaps a running connection. Use **Leave session and apply at title** to invoke the game's normal exit confirmation. A guest in a dungeon follows the native settlement flow. Once the session has ended at the title, preferences are applied and the network settings page reopens. Then load a save to host/join using the selected transport. This flow keeps the process running; restarting it would repeat native Workshop late activation.
+
+Default host ports and explicit client destination ports are separate. Saving another default port does not change the port of an existing guest connection. Required Workshop-package checks remain in place. See `DESIGN.md` for lifecycle invariants and verification boundaries.
+
+The host must install the plugin. Clients receive synchronized enemy health from the server. Fresh Steam mid-run joining does not require the plugin on clients. The host directly grants automatic catch-up and creates vanilla compensation objects such as Anvils, so those objects can be used without the client plugin; install the plugin for the F8 compensation status page, transfers, progress selection, rescue requests, or IP/LAN rooms. Sephiria Together version differences do not block joining; a temporary warning is shown for 20 seconds and then disappears. Game versions must match: updated game builds change the native network protocol, so a mismatched game version is rejected by the game's own authentication. Workshop packages remain subject to the game's own compatibility checks.
 
 `EnableAntiCheat` is intentionally basic. When enabled by the host, it blocks direct remote money mutations and explicit direct inventory writes; native rewards and other game interactions remain under the original game flow. The host can handle any other suspicious behavior through the native kick interface.
 
@@ -70,13 +97,13 @@ Modded clients show a prominent banner when a teammate's synchronized `IsDead` s
 
 The optional `Multiplayer/AutoReviveWhenClear` setting is host-authoritative and works for unmodded clients. When no living hostile non-dummy units remain and surviving players are out of combat for two seconds, all downed players revive at 50% max HP. If the final player falls after the room is already clear, the same enemy check runs before vanilla game over and revives the party immediately; active enemies always preserve the original game-over behavior.
 
-Before a run enters the dungeon, the host can rebuild its starting progress from an online player's validated story progress or choose a specific normal story chapter from the manual dropdown. Internal transition, side-story, test, and multiplayer-blocked races are excluded. This changes only the current run's starting chapter and does not edit personal saves. If an older client cannot send the Mod progress report, the host falls back to its synchronized main-quest progress; late progress without current quest-node data uses the corresponding normal chapter start.
+Before a main-story run enters the dungeon, the host can rebuild its starting progress from an online player's validated story progress or choose a specific normal story chapter from the manual dropdown. Internal transition, side-story, test, and multiplayer-blocked races are excluded. This changes only the current run's starting chapter and does not edit personal saves. The picker is disabled inside custom game modes. If an older client cannot send the Mod progress report, the host falls back to its synchronized main-quest progress; late progress without current quest-node data uses the corresponding normal chapter start.
 
 The F8 Saves page can create a manual snapshot of the selected profile and its current-run TMP data. These snapshots are stored under `Documents/Saved Games/Sephiria/SephiriaTogetherBackups`, outside the filename pattern used by the game's rotating backups, so the game does not delete older mod snapshots. The save currently in use, automatic game backups, and manual backups created by this Mod can be activated from the same page. Activation requires confirmation, safely leaves the current session, waits for asynchronous saving to finish, creates a pre-restore snapshot, atomically replaces the selected slot, and reloads it from the title scene.
 
 ## IP and LAN rooms
 
-The IP transport is installed before the first network session. Offline builds enable TCP/IP by default, but it can be disabled with `DirectConnect/OfflineEnabled` in the F8 menu or config. Steam users control it with `DirectConnect/Enabled`. Changes apply before a room starts, while an active room or game session cannot hot-switch transport. The default TCP game port is `7777`.
+The IP transport is selected only while networking is idle or at an explicit session-start boundary. Offline preferences default to TCP/IP and use `DirectConnect/OfflineEnabled`; Steam-online preferences use `DirectConnect/Enabled`. Preferences can be edited in-game and queued for the next session. The default TCP game port is `7777`. Native Workshop users follow the session-preparation flow above on each cold launch when the saved mode differs from the session that the base game already started.
 
 After selecting a save, open the game's original multiplayer panel:
 
@@ -86,7 +113,7 @@ After selecting a save, open the game's original multiplayer panel:
 
 Discovery uses UDP `7780`; gameplay uses the configured TCP port. Allow both through the firewall. The current client sends both the current discovery query and a `3.7.0` compatibility query, so rooms hosted by the previous Mod release can still appear. Automatic discovery requires a LAN or virtual network that permits peer-to-peer traffic. Route-only game accelerators may not expose peers to one another, so manual IP joining remains available.
 
-IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player lists without requiring Steam lobby identities. Different Mod versions can still connect when the host has the compatibility patch, but both sides must run the same game version because updated game builds change Mirror serialization and command hashes. A `3.7.0` host can be discovered by a newer client after the compatibility query, yet joining still requires the same game version.
+IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player lists without requiring Steam lobby identities. Different Sephiria Together versions can still connect, but both sides must run the same game version because updated game builds change Mirror serialization and command hashes. A `3.7.0` host can be discovered by a newer client after the compatibility query, yet joining still requires the same game version. IP rooms support the native custom-game selection and player cap. IP discovery does not exchange Workshop dependency lists; arrange matching required Workshop packages, versions, and load order before connecting.
 
 ## Configuration
 
@@ -101,9 +128,9 @@ IP players use Mirror-synchronized GUIDs, names, health/mana bars, and player li
 - `ScaleEnemyCount`: increase enemy count for procedural multiplayer waves. Default: `true`.
 - `EnemyCountPerExtraPlayer`: extra procedural-wave enemies per player above the baseline. Default: `0.08` (8%).
 - `MaximumEnemyCountMultiplier`: cap for the additional procedural-wave count multiplier. Default: `3`.
-- `DirectConnect/Enabled`: enable TCP/IP rooms while Steam is online and no network session is active. Default: `false`.
-- `DirectConnect/OfflineEnabled`: enable TCP/IP rooms while Steam is offline and no network session is active. Default: `true`.
-- `DirectConnect/Port`: TCP game port. It can be changed before a session starts; an active session keeps its current transport and port. Default: `7777`. LAN discovery uses UDP `7780`.
+- `DirectConnect/Enabled`: saved TCP/IP preference for Steam-online sessions. Editable during play; applied after the current session ends. Default: `false`.
+- `DirectConnect/OfflineEnabled`: saved TCP/IP preference for offline sessions. Editable during play; applied while idle. Default: `true`.
+- `DirectConnect/Port`: default TCP host/join port for the next session. Editing it never changes a running host's port or a guest's explicit connection target. Default: `7777`. LAN discovery uses UDP `7780`.
 
 `PlayerLimit` is applied when creating the next host/Lobby. Do not rely on changing it after a server is already listening. The F8 menu is host-only for gameplay settings; clients can install the plugin for reconnect UI compatibility but cannot configure the host.
 
@@ -115,7 +142,7 @@ Configuration changes take effect for newly spawned enemies. Restart the run aft
 
 When the host has this option enabled, players who have already unlocked multiplayer but have lower quest progress can use the Steam lobby list, room code or Steam invitation without installing the plugin themselves. The host publishes only the lobby's admission chapter as `0`; this plugin does not directly modify save data or quest progress.
 
-The plugin records game and Mod version differences for diagnostics. Differing Mod versions remain joinable, while a game-version mismatch is rejected by the game's native authentication. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
+The plugin records game and Sephiria Together version differences for diagnostics. Differing Sephiria Together versions remain joinable, while a game-version mismatch is rejected by the game's native authentication. Existing players reconnect with their server-side run slot and do not receive catch-up experience. A fresh player gets a new run-save slot so they cannot overwrite a disconnected player's inventory or progress.
 
 Fresh mid-run players follow the game's existing floor join behavior: normally they enter at the host floor's spawn point; during a boss fight the game places them near the host. EXP catch-up uses the normal `AddExp` path, so level-up Sephirite choices, level-derived inventory expansion and other level-up effects are generated exactly as they are for earned experience. Catch-up never selects a weapon build path for a player; selectable rewards remain in the host entitlement ledger until claimed through a vanilla compensation object or, for modded clients, the corresponding status flow.
 
@@ -128,6 +155,7 @@ The project references assemblies from a local Sephiria installation and does no
 ```powershell
 $env:SEPHIRIA_DIR = "E:\SteamLibrary\steamapps\common\Sephiria"
 .\scripts\build.ps1
+.\scripts\validate-compatibility.ps1 -GameDir "$env:SEPHIRIA_DIR"
 ```
 
 To build and copy the plugin directly into the game:
@@ -139,17 +167,37 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
- .\scripts\package.ps1 -Version 3.9.5
+ .\scripts\package.ps1 -Version 3.9.9 -IncludeWorkshop
 ```
 
-This creates a standalone DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.
+This creates a standalone BepInEx DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. `-IncludeWorkshop` also builds the separately named native Workshop ZIP; upload tickets and review proofs are excluded. SHA-256 checksums are generated for the assets. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.
+
+Build the native Workshop package (no automatic deployment or Steam upload):
+
+```powershell
+.\scripts\build-workshop.ps1 -GameDir "$env:SEPHIRIA_DIR"
+```
+
+The native DLL is built with `-p:Loader=Workshop` into `bin/Workshop/Release/netstandard2.1/SephiriaTogether.Workshop.dll`. Intermediate files are isolated from the BepInEx build. Package validation uses Mono.Cecil from the developer's BepInEx installation; it is not a runtime dependency and is not included in the package.
+
+After uploading an update, separately verify its review status with `scripts/check-workshop-review.ps1 -PackageRoot "<original local upload folder>"`. This read-only tool computes the game's DLL-set fingerprint and queries the public review endpoint for the original Workshop ID. A successful Steam upload or an old `approved` ticket does not mean the updated DLL is approved. See `workshop/README.md` for review/F8 troubleshooting.
+
+Run the adapter/policy tests (.NET SDK 9) and patch regression tests (.NET Framework 4.8 on Windows):
+
+```powershell
+dotnet run --project tests/WorkshopSupport.Tests/WorkshopSupport.Tests.csproj -c Release
+dotnet run --project tests/PatchBinding.Tests/PatchBinding.Tests.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR"
+```
 
 ## Compatibility
 
-- Built and tested against Sephiria 1.0.31, Unity Mono, Windows x64.
-- Requires BepInEx 5.
-- Supports the Steam build and tested offline builds that expose compatible networking APIs; both sides must use the same game version, and changed game internals can still make a pairing unusable.
+- Built and statically checked against Sephiria 1.1.1 (Workshop update), Unity Mono, Windows x64. Native F8 and the 3.9.8 single-host IP/native return-to-title switching flow were user-tested and confirmed in Player.log. Remote multiplayer regression testing is still needed for this update.
+- The BepInEx build requires BepInEx 5 and is installed under `BepInEx/plugins`. The native build loads through `WorkshopModBase` and the game's official Workshop UI.
+- Enable one loader build at a time, then restart. The native entry refuses duplicate loading, including older BepInEx instances, to avoid applying rewards/scaling twice.
+- Steam joining retains the native Workshop package/version/load-order checks and the host-only-Mod notice. `AllowLowerProgressPlayers` affects story progress only. Native restrictions on loaded local Workshop packages also apply to IP creation/joining.
+- Both sides must use the same game version and compatible gameplay packages. Host-only Sephiria Together features do not remove other packages' client requirements.
 - Game updates can change internal methods and require a rebuild.
+- Star 2.7.4 requires installation on all peers. Together retains its chosen room cap after Star's fixed-50 admission prefix and suspends story selection in Star's Boss Rush/Infinite modes. Backpack Organizer Workshop 3.0.0 uses native swap/rotate commands and needs no anti-cheat exemption. Targeted checks are complete; full three-Mod multiplayer regression is still pending.
 
 ## License
 

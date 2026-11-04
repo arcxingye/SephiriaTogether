@@ -43,7 +43,7 @@ namespace SephiriaTogether
         {
             PlayerAvatar local = CombatManager.Instance != null ? CombatManager.Instance.CurrentPlayer : null;
             if (Plugin.IsShortcutBound(Plugin.rescueShortcut.Value) &&
-                Plugin.rescueShortcut.Value.IsDown() && local != null && local.IsDead &&
+                Plugin.IsShortcutDown(Plugin.rescueShortcut.Value) && local != null && local.IsDead &&
                 CatchUpRewards.HostSupportsProtocol())
             {
                 NetworkClient.Send(new RescueRequestMessage());
