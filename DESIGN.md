@@ -4,7 +4,7 @@
 
 Both binaries compile the same gameplay rules, reward bookkeeping, UI and custom
 message layouts. Loader adapters own startup, logging and configuration storage.
-The BepInEx adapter runs at process startup. In Sephiria 1.1.1, the native adapter
+The BepInEx adapter runs at process startup. In Sephiria 1.1.2, the native adapter
 runs only when `GameDataLoader.Awake` activates Workshop DLLs after entering a save.
 These are not interchangeable startup guarantees.
 
@@ -52,12 +52,20 @@ target ports are cleared on disconnect and never replace the persisted default.
 ## Other activation-sensitive features
 
 - Room capacity is applied to `NetworkServer.maxConnections` on server startup
-  and Steam room creation; changing only `NetworkManager.maxConnections` after
-  `Mirror.Listen` would leave an old admission cap. IP creation already applies
+  and room creation. Together also updates the 1.1.2 Steam transport's live
+  private `NextServer`/`LegacyServer` capacity after late Workshop
+  activation; changing only `NetworkManager.maxConnections` after
+  `Mirror.Listen` would leave an old admission cap. IP and EOS creation apply
   both values. The selected/custom-mode room cap is preserved.
 - Enemy scaling and basic protection are evaluated when gameplay events occur.
 - Reward handlers and reconnect bookkeeping use session callbacks; custom protocol
-  features remain gated by the version handshake.
+  features remain gated by the version handshake. Handlers can be registered
+  repeatedly without clearing confirmation. The handshake waits for readiness,
+  probes every three seconds at first and every thirty seconds after five sends,
+  and stops on a complete report. A thirty-second unanswered wait is displayed
+  as unconfirmed, never as proof that the Mod is absent. State follows connection
+  objects, so reused connection IDs cannot inherit confirmation. Live reports
+  take precedence over potentially stale lobby version labels.
 - Save management is available after native activation, not before the first save
   is entered on a cold launch.
 
@@ -67,9 +75,14 @@ The adapter tests execute the production configuration, input and transport
 decision code. They cover active-session deferral, idle application, restoration,
 missing originals, explicit client ports, and all combinations of session/run/
 transition blockers. Patch regression tests execute the production Steam join
-transpiler with overloaded indexers. Metadata checks inspect real game targets.
+transpiler and world-map radius patch through real Harmony against overloaded
+fixtures. Network-session tests execute the production handshake and capacity
+code with simulated time, connections and both Steam server layouts. Metadata
+checks inspect the actual game's entry points and private fields.
 
 The automated checks alone do not prove socket or scene-lifecycle behavior.
+On 2026-11-08 the user confirmed the deployed 3.10.0 native Workshop menu opens
+on game 1.1.2. This verifies menu availability, not remote handshake or capacity.
 On 2026-11-01 the user completed the live 3.9.8 native acceptance flow in both
 directions: queue IP in a save, exit normally, apply at title and re-enter; then
 queue native mode and repeat. Player.log confirms deferred preferences while

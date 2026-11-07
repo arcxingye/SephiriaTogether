@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using HarmonyLib;
 using HeathenEngineering.SteamworksIntegration;
@@ -23,66 +22,82 @@ namespace SephiriaTogether
 
     internal static class VersionCompatibility
     {
-        private static readonly HashSet<int> HelloConnections = new HashSet<int>();
-        private static readonly HashSet<int> ProtocolCompatibleConnections = new HashSet<int>();
-        private static readonly Dictionary<int, string> RemoteGameVersions = new Dictionary<int, string>();
-        private static readonly Dictionary<int, string> RemoteModVersions = new Dictionary<int, string>();
+        private static readonly HashSet<NetworkConnectionToClient> HelloConnections = new HashSet<NetworkConnectionToClient>();
+        private static readonly HashSet<NetworkConnectionToClient> ProtocolCompatibleConnections = new HashSet<NetworkConnectionToClient>();
+        private static readonly Dictionary<NetworkConnectionToClient, string> RemoteGameVersions = new Dictionary<NetworkConnectionToClient, string>();
+        private static readonly Dictionary<NetworkConnectionToClient, string> RemoteModVersions = new Dictionary<NetworkConnectionToClient, string>();
+        private static readonly Dictionary<NetworkConnectionToClient, float> PendingConnections = new Dictionary<NetworkConnectionToClient, float>();
+        private static readonly List<NetworkConnectionToClient> PendingSnapshot = new List<NetworkConnectionToClient>();
+        private static NetworkConnectionToServer clientConnection;
+        private static bool clientMessagesRegistered;
+        private static float clientReadySince = -1f;
+        private static float nextHelloAt;
+        private static int helloAttempts;
+        private static bool clientPendingShown;
+        private const float PendingWarningDelay = 30f;
         private static bool clientNoticeReceived;
         private static string remoteGameVersion = "";
         private static string remoteModVersion = "";
         private static string remoteRoomScope = "";
         private static bool clientProtocolConfirmed;
         private static bool remoteModMetadataAuthoritative;
+        internal static bool HasClientVersionReport => NetworkClient.active && clientNoticeReceived &&
+            ReferenceEquals(clientConnection, NetworkClient.connection);
 
         internal static void RegisterServerMessages()
         {
             ConfigureSerialization();
             NetworkServer.RegisterHandler<VersionCompatibilityHelloMessage>(OnServerHello, true);
+            foreach (NetworkConnectionToClient connection in NetworkServer.connections.Values)
+                TrackConnection(connection);
         }
 
         internal static void TrackConnection(NetworkConnectionToClient connection)
         {
-            if (connection == null || connection == NetworkServer.localConnection || Plugin.InstanceForPatches == null)
+            if (connection == null || connection == NetworkServer.localConnection ||
+                HelloConnections.Contains(connection) || PendingConnections.ContainsKey(connection))
                 return;
-            Plugin.InstanceForPatches.StartCoroutine(WaitForHello(connection));
+            PendingConnections[connection] = -1f;
         }
 
         internal static void RecordGameVersion(NetworkConnectionToClient connection, string version)
         {
-            if (connection != null) RemoteGameVersions[connection.connectionId] = version ?? "";
+            if (connection != null) RemoteGameVersions[connection] = version ?? "";
         }
 
         internal static void RemoveConnection(NetworkConnectionToClient connection)
         {
             if (connection == null) return;
-            HelloConnections.Remove(connection.connectionId);
-            ProtocolCompatibleConnections.Remove(connection.connectionId);
-            RemoteGameVersions.Remove(connection.connectionId);
-            RemoteModVersions.Remove(connection.connectionId);
+            HelloConnections.Remove(connection);
+            ProtocolCompatibleConnections.Remove(connection);
+            RemoteGameVersions.Remove(connection);
+            RemoteModVersions.Remove(connection);
+            PendingConnections.Remove(connection);
+            VersionReminder.Dismiss(ServerWarningScope(connection));
         }
 
         internal static void ClearConnections()
         {
+            foreach (NetworkConnectionToClient connection in RemoteModVersions.Keys)
+                VersionReminder.Dismiss(ServerWarningScope(connection));
+            foreach (NetworkConnectionToClient connection in PendingConnections.Keys)
+                VersionReminder.Dismiss(ServerWarningScope(connection));
             HelloConnections.Clear();
             ProtocolCompatibleConnections.Clear();
             RemoteGameVersions.Clear();
             RemoteModVersions.Clear();
+            PendingConnections.Clear();
         }
 
         internal static void RegisterClientMessages()
         {
             ConfigureSerialization();
-            clientNoticeReceived = false;
-            clientProtocolConfirmed = false;
             NetworkClient.RegisterHandler<VersionCompatibilityNoticeMessage>(OnClientNotice, true);
-            if (NetworkServer.active)
-            {
-                clientProtocolConfirmed = true;
-                return;
-            }
+            // Replacing the handler is harmless; resetting an established
+            // handshake here loses confirmation during late Workshop activation.
+            clientMessagesRegistered = true;
+            if (NetworkServer.active) return;
             ShowPendingWarning();
-            if (Plugin.InstanceForPatches != null)
-                Plugin.InstanceForPatches.StartCoroutine(SendHelloWhenReady());
         }
 
         internal static void PrepareLobbyJoin(LobbyData lobby)
@@ -106,9 +121,14 @@ namespace SephiriaTogether
                 manager.Lobby.IsOwner) return;
 
             string scope = "steam:" + manager.Lobby;
-            if (!string.Equals(remoteRoomScope, scope, StringComparison.Ordinal) ||
-                string.IsNullOrEmpty(remoteModVersion))
+            if (!string.Equals(remoteRoomScope, scope, StringComparison.Ordinal))
                 PrepareLobbyJoin(manager.Lobby);
+            else if (!clientNoticeReceived)
+            {
+                remoteGameVersion = manager.Lobby["z_heathenGameVersion"] ?? "";
+                remoteModVersion = manager.Lobby["SephiriaTogether"] ?? "";
+                remoteModMetadataAuthoritative = !string.IsNullOrEmpty(remoteModVersion);
+            }
         }
 
         internal static void PrepareEosJoin(EOSLobbyInfo info)
@@ -138,8 +158,7 @@ namespace SephiriaTogether
             // new one. Keep the selected room metadata through that handoff.
             if (SteamInvitation.waitForExternalConnect && !string.IsNullOrEmpty(remoteRoomScope))
             {
-                clientNoticeReceived = false;
-                clientProtocolConfirmed = false;
+                ResetClientHandshake();
                 return;
             }
             ResetClientRoomState();
@@ -152,7 +171,8 @@ namespace SephiriaTogether
             PrepareIpJoin(gameVersion, modVersion, address, port, metadataAuthoritative: true);
             bool gameMismatch = !string.IsNullOrEmpty(gameVersion) &&
                                 !string.Equals(gameVersion, Application.version, StringComparison.OrdinalIgnoreCase);
-            bool modMismatch = !string.Equals(modVersion, Plugin.PluginVersion, StringComparison.OrdinalIgnoreCase);
+            bool modMismatch = !string.IsNullOrEmpty(modVersion) &&
+                               !string.Equals(modVersion, Plugin.PluginVersion, StringComparison.OrdinalIgnoreCase);
             if (gameMismatch || modMismatch)
                 ShowMismatch(gameVersion, modVersion, "ip:" + address + ":" + port);
         }
@@ -160,24 +180,23 @@ namespace SephiriaTogether
         internal static bool HostSupportsProtocolMetadata()
         {
             if (NetworkServer.active) return true;
-            return clientProtocolConfirmed;
+            return NetworkClient.active && ReferenceEquals(clientConnection, NetworkClient.connection) && clientProtocolConfirmed;
         }
 
         internal static bool IsProtocolCompatibleConnection(NetworkConnectionToClient connection)
         {
-            return connection != null && (connection.connectionId == 0 ||
-                connection == NetworkServer.localConnection ||
-                ProtocolCompatibleConnections.Contains(connection.connectionId));
+            return connection != null && (connection == NetworkServer.localConnection ||
+                IsCurrentServerConnection(connection) && ProtocolCompatibleConnections.Contains(connection));
         }
 
         internal static bool IsCrossVersionConnection(NetworkConnectionToClient connection)
         {
             if (connection == null) return false;
-            bool gameMismatch = RemoteGameVersions.TryGetValue(connection.connectionId, out string gameVersion) &&
+            bool gameMismatch = RemoteGameVersions.TryGetValue(connection, out string gameVersion) &&
                                 !string.IsNullOrEmpty(gameVersion) &&
                                 !string.Equals(gameVersion, Application.version,
                                     StringComparison.OrdinalIgnoreCase);
-            bool modMismatch = RemoteModVersions.TryGetValue(connection.connectionId, out string modVersion) &&
+            bool modMismatch = RemoteModVersions.TryGetValue(connection, out string modVersion) &&
                                !string.IsNullOrEmpty(modVersion) &&
                                !string.Equals(modVersion, Plugin.PluginVersion,
                                    StringComparison.OrdinalIgnoreCase);
@@ -201,7 +220,7 @@ namespace SephiriaTogether
         {
             try
             {
-                if (lobby.IsOwner) return;
+                if (lobby.IsOwner || HasClientVersionReport) return;
                 string gameVersion = lobby["z_heathenGameVersion"] ?? "";
                 string modVersion = lobby["SephiriaTogether"] ?? "";
                 bool gameMismatch = !string.IsNullOrEmpty(gameVersion) &&
@@ -226,9 +245,10 @@ namespace SephiriaTogether
                 return string.Format(MenuText.Get("GameVersionMismatchWarning"),
                     Application.version, remoteGameVersion);
             }
-            return string.Format(MenuText.Get("ModVersionMismatchWarning"),
-                Plugin.PluginVersion,
-                string.IsNullOrEmpty(remoteModVersion) ? MenuText.Get("VersionNotInstalled") : remoteModVersion);
+            if (string.IsNullOrEmpty(remoteModVersion) ||
+                string.Equals(remoteModVersion, Plugin.PluginVersion, StringComparison.OrdinalIgnoreCase))
+                return MenuText.Get("VersionUnconfirmedWarning");
+            return string.Format(MenuText.Get("ModVersionMismatchWarning"), Plugin.PluginVersion, remoteModVersion);
         }
 
         private static void ShowMismatch(string remoteGameVersion, string remoteModVersion, string scope = null)
@@ -236,7 +256,7 @@ namespace SephiriaTogether
             string message = FormatVersionMismatch(remoteGameVersion, remoteModVersion);
             scope = string.IsNullOrEmpty(scope) ? CurrentClientRoomScope() : scope;
             bool survivesNoLobby = scope.StartsWith("ip:", StringComparison.Ordinal) ||
-                                   scope.StartsWith("eos:", StringComparison.Ordinal) || scope == "host-room";
+                                   scope.StartsWith("eos:", StringComparison.Ordinal) || scope.StartsWith("host-", StringComparison.Ordinal);
             VersionReminder.ShowTemporary(message, scope, survivesNoLobby);
         }
 
@@ -250,49 +270,85 @@ namespace SephiriaTogether
             return "ip:" + address + ":" + IpTransport.ActivePort;
         }
 
-        private static IEnumerator SendHelloWhenReady()
+        internal static void Tick()
         {
-            float deadline = Time.realtimeSinceStartup + 10f;
-            while (NetworkClient.active && (!NetworkClient.ready || !CanAttemptProtocolHandshake()) &&
-                   Time.realtimeSinceStartup < deadline)
-                yield return null;
-            if (NetworkClient.active && NetworkClient.ready && CanAttemptProtocolHandshake())
+            TickPendingConnections();
+            if (!clientMessagesRegistered || !CanAttemptProtocolHandshake()) return;
+            if (!RefreshClientConnection()) return;
+            if (!NetworkClient.ready || !clientConnection.isAuthenticated) return;
+            if (clientNoticeReceived)
             {
-                Plugin.LogInfo($"Version handshake sent: localGame={Application.version}, " +
-                               $"localMod={Plugin.PluginVersion}, scope={CurrentClientRoomScope()}.");
+                if (clientProtocolConfirmed) CatchUpRewards.SendHello();
+                return;
+            }
+            float now = Time.realtimeSinceStartup;
+            if (clientReadySince < 0f) clientReadySince = now;
+            if (now >= nextHelloAt)
+            {
+                helloAttempts++;
+                // Keep a slow probe for hosts whose Workshop runtime activates
+                // late, without flooding sessions which do not run Together.
+                nextHelloAt = now + (helloAttempts < 5 ? 3f : 30f);
+                if (helloAttempts == 1)
+                    Plugin.LogInfo($"Version handshake started: localGame={Application.version}, " +
+                                   $"localMod={Plugin.PluginVersion}, scope={CurrentClientRoomScope()}.");
                 NetworkClient.Send(new VersionCompatibilityHelloMessage
                 {
                     gameVersion = Application.version,
                     modVersion = Plugin.PluginVersion
                 });
-                float noticeDeadline = Time.realtimeSinceStartup + 12f;
-                while (NetworkClient.active && !clientNoticeReceived && Time.realtimeSinceStartup < noticeDeadline)
-                    yield return null;
-                if (NetworkClient.active && !clientNoticeReceived && !remoteModMetadataAuthoritative)
-                    ShowMismatch(remoteGameVersion, "", remoteRoomScope);
             }
+            if (!clientNoticeReceived && !clientPendingShown && now - clientReadySince >= PendingWarningDelay)
+            {
+                clientPendingShown = true;
+                Plugin.LogInfo($"Version handshake awaiting host report: attempts={helloAttempts}, scope={CurrentClientRoomScope()}.");
+                if (!HasReportedMismatch(remoteGameVersion, remoteModVersion))
+                    ShowMismatch("", "", CurrentClientRoomScope());
+            }
+        }
+
+        private static bool RefreshClientConnection()
+        {
+            NetworkConnectionToServer current = NetworkClient.active ? NetworkClient.connection : null;
+            if (!ReferenceEquals(clientConnection, current))
+            {
+                ResetClientHandshake();
+                clientMessagesRegistered = true;
+                clientConnection = current;
+            }
+            return current != null;
         }
 
         private static void OnServerHello(NetworkConnectionToClient connection, VersionCompatibilityHelloMessage message)
         {
-            if (connection == null) return;
-            HelloConnections.Add(connection.connectionId);
-            RemoteModVersions[connection.connectionId] = message.modVersion ?? "";
+            if (!IsCurrentServerConnection(connection)) return;
+            bool firstReport = HelloConnections.Add(connection);
+            bool changed = !RemoteModVersions.TryGetValue(connection, out string previousMod) ||
+                           previousMod != (message.modVersion ?? "");
+            RemoteModVersions[connection] = message.modVersion ?? "";
             // Native authentication already enforces the exact game version.
             // The custom hello still carries the client's report for warnings
             // and for gating custom features on an identical Mod protocol.
             string remoteGameVersion = message.gameVersion ?? "";
             if (string.IsNullOrEmpty(remoteGameVersion) &&
-                RemoteGameVersions.TryGetValue(connection.connectionId, out string reported))
+                RemoteGameVersions.TryGetValue(connection, out string reported))
                 remoteGameVersion = reported;
+            changed |= !RemoteGameVersions.TryGetValue(connection, out string previousGame) || previousGame != remoteGameVersion;
+            RemoteGameVersions[connection] = remoteGameVersion;
             bool gameMismatch = !string.Equals(remoteGameVersion, Application.version, StringComparison.OrdinalIgnoreCase);
             bool modMismatch = !string.Equals(message.modVersion, Plugin.PluginVersion, StringComparison.OrdinalIgnoreCase);
             if (!gameMismatch && !modMismatch)
-                ProtocolCompatibleConnections.Add(connection.connectionId);
-            Plugin.LogInfo($"Version handshake received: conn={connection.connectionId}, " +
-                           $"remoteGame={remoteGameVersion}, remoteMod={message.modVersion}, " +
-                           $"protocolCompatible={!gameMismatch && !modMismatch}.");
-            if (gameMismatch || modMismatch) ShowMismatch(remoteGameVersion, message.modVersion, "host-room");
+                ProtocolCompatibleConnections.Add(connection);
+            else ProtocolCompatibleConnections.Remove(connection);
+            PendingConnections.Remove(connection);
+            if (firstReport || changed)
+            {
+                Plugin.LogInfo($"Version handshake received: conn={connection.connectionId}, " +
+                               $"remoteGame={remoteGameVersion}, remoteMod={message.modVersion}, " +
+                               $"protocolCompatible={!gameMismatch && !modMismatch}.");
+                VersionReminder.Dismiss(ServerWarningScope(connection));
+                if (gameMismatch || modMismatch) ShowMismatch(remoteGameVersion, message.modVersion, ServerWarningScope(connection));
+            }
             connection.Send(new VersionCompatibilityNoticeMessage
             {
                 gameVersion = Application.version,
@@ -300,51 +356,56 @@ namespace SephiriaTogether
             });
         }
 
-        private static IEnumerator WaitForHello(NetworkConnectionToClient connection)
-        {
-            float deadline = Time.realtimeSinceStartup + 12f;
-            while (NetworkServer.active && connection != null &&
-                   NetworkServer.connections.ContainsKey(connection.connectionId) &&
-                   !HelloConnections.Contains(connection.connectionId) &&
-                   Time.realtimeSinceStartup < deadline)
-                yield return null;
+        private static string ServerWarningScope(NetworkConnectionToClient connection) => "host-peer:" + connection.connectionId;
 
-            if (NetworkServer.active && connection != null &&
-                NetworkServer.connections.ContainsKey(connection.connectionId) &&
-                !HelloConnections.Contains(connection.connectionId))
+        private static bool IsCurrentServerConnection(NetworkConnectionToClient connection) =>
+            NetworkServer.active && connection != null &&
+            NetworkServer.connections.TryGetValue(connection.connectionId, out NetworkConnectionToClient current) &&
+            ReferenceEquals(current, connection);
+
+        private static void TickPendingConnections()
+        {
+            PendingSnapshot.Clear();
+            PendingSnapshot.AddRange(PendingConnections.Keys);
+            foreach (NetworkConnectionToClient connection in PendingSnapshot)
             {
-                string remoteGameVersion = RemoteGameVersions.TryGetValue(connection.connectionId, out string reported)
-                    ? reported : Application.version;
-                Plugin.LogInfo($"Version handshake not received: conn={connection.connectionId}, " +
-                               $"remoteGame={remoteGameVersion}.");
-                ShowMismatch(remoteGameVersion, MenuText.Get("VersionNotInstalled"), "host-room");
+                if (!IsCurrentServerConnection(connection)) { RemoveConnection(connection); continue; }
+                if (!connection.isAuthenticated || !connection.isReady) continue;
+                float since = PendingConnections[connection];
+                if (since < 0f) PendingConnections[connection] = Time.realtimeSinceStartup;
+                else if (!float.IsPositiveInfinity(since) && Time.realtimeSinceStartup - since >= PendingWarningDelay)
+                {
+                    PendingConnections[connection] = float.PositiveInfinity;
+                    Plugin.LogInfo($"Version handshake awaiting client report: conn={connection.connectionId}.");
+                    ShowMismatch("", "", ServerWarningScope(connection));
+                }
             }
+            PendingSnapshot.Clear();
         }
 
         private static void OnClientNotice(VersionCompatibilityNoticeMessage message)
         {
-            clientNoticeReceived = true;
+            if (!clientMessagesRegistered || NetworkServer.active || !RefreshClientConnection()) return;
+            remoteGameVersion = message.gameVersion ?? "";
             remoteModVersion = message.modVersion ?? "";
-            bool gameMismatch = !string.IsNullOrEmpty(message.gameVersion) &&
-                                !string.Equals(message.gameVersion, Application.version,
+            clientNoticeReceived = !string.IsNullOrEmpty(remoteGameVersion) && !string.IsNullOrEmpty(remoteModVersion);
+            bool gameMismatch = !string.Equals(message.gameVersion, Application.version,
                                     StringComparison.OrdinalIgnoreCase);
             bool modMismatch = !string.Equals(message.modVersion, Plugin.PluginVersion, StringComparison.OrdinalIgnoreCase);
             clientProtocolConfirmed = !gameMismatch && !modMismatch;
             Plugin.LogInfo($"Version notice received: remoteGame={message.gameVersion}, " +
-                           $"remoteMod={message.modVersion}, protocolCompatible={clientProtocolConfirmed}.");
+                            $"remoteMod={message.modVersion}, protocolCompatible={clientProtocolConfirmed}.");
+            VersionReminder.Dismiss(CurrentClientRoomScope());
             if (gameMismatch || modMismatch) ShowMismatch(message.gameVersion, message.modVersion);
-            if (clientProtocolConfirmed && Plugin.InstanceForPatches != null)
-                Plugin.InstanceForPatches.StartCoroutine(SendCatchUpHelloNextFrame());
         }
 
-        private static IEnumerator SendCatchUpHelloNextFrame()
-        {
-            yield return null;
-            CatchUpRewards.SendHello();
-        }
+        private static bool HasReportedMismatch(string gameVersion, string modVersion) =>
+            !string.IsNullOrEmpty(gameVersion) && !string.Equals(gameVersion, Application.version, StringComparison.OrdinalIgnoreCase) ||
+            !string.IsNullOrEmpty(modVersion) && !string.Equals(modVersion, Plugin.PluginVersion, StringComparison.OrdinalIgnoreCase);
 
         private static void ShowPendingWarning()
         {
+            if (HasClientVersionReport) return;
             bool gameMismatch = !string.IsNullOrEmpty(remoteGameVersion) &&
                                 !string.Equals(remoteGameVersion, Application.version,
                                     StringComparison.OrdinalIgnoreCase);
@@ -384,10 +445,21 @@ namespace SephiriaTogether
             remoteGameVersion = "";
             remoteModVersion = "";
             remoteRoomScope = "";
-            clientNoticeReceived = false;
-            clientProtocolConfirmed = false;
+            ResetClientHandshake();
             remoteModMetadataAuthoritative = false;
             VersionReminder.Clear();
+        }
+
+        private static void ResetClientHandshake()
+        {
+            clientConnection = null;
+            clientMessagesRegistered = false;
+            clientNoticeReceived = false;
+            clientProtocolConfirmed = false;
+            clientReadySince = -1f;
+            nextHelloAt = 0f;
+            helloAttempts = 0;
+            clientPendingShown = false;
         }
     }
 

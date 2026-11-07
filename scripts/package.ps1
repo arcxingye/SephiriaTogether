@@ -1,6 +1,6 @@
 param(
     [string]$GameDir = $env:SEPHIRIA_DIR,
-    [string]$Version = "3.9.9",
+    [string]$Version = "3.10.0",
     [switch]$IncludeWorkshop
 )
 
@@ -15,6 +15,24 @@ $bepInExUrl = "https://github.com/BepInEx/BepInEx/releases/download/v$bepInExVer
 $bepInExSha256 = "82f9878551030f54657792c0740d9d51a09500eeae1fba21106b0c441e6732c4"
 $bepInExArchive = Join-Path $artifacts $bepInExAsset
 $bundleStaging = Join-Path $artifacts "SephiriaTogether-$Version-with-BepInEx"
+
+function Save-GitHubLicense([string]$Repository, [string]$Tag, [string]$Destination) {
+    # raw.githubusercontent.com can stall on otherwise working GitHub routes.
+    # Prefer the Contents API when gh is available, with a bounded raw fallback.
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        $response = & gh api "repos/$Repository/contents/LICENSE?ref=$Tag"
+        if ($LASTEXITCODE -eq 0) {
+            $entry = ($response -join "`n") | ConvertFrom-Json
+            if ($entry.encoding -cne "base64" -or $entry.size -le 0) { throw "Invalid license response: $Repository@$Tag" }
+            $bytes = [Convert]::FromBase64String($entry.content)
+            if ($bytes.Length -ne $entry.size) { throw "Incomplete license response: $Repository@$Tag" }
+            [System.IO.File]::WriteAllBytes($Destination, $bytes)
+            return
+        }
+    }
+    Invoke-WebRequest -UseBasicParsing -TimeoutSec 20 `
+        -Uri "https://raw.githubusercontent.com/$Repository/$Tag/LICENSE" -OutFile $Destination
+}
 
 if (-not (Test-Path -LiteralPath $projectRoot -PathType Container)) {
     throw "Project root is missing: $projectRoot"
@@ -85,12 +103,8 @@ foreach ($document in @("README.zh-CN.md", "COMPATIBILITY.md", "DESIGN.md")) {
 }
 Copy-Item -LiteralPath "$projectRoot\LICENSE" -Destination "$bundleStaging\licenses\SephiriaTogether-MIT.txt"
 Copy-Item -LiteralPath "$projectRoot\THIRD-PARTY-NOTICES.md" -Destination $bundleStaging
-Invoke-WebRequest `
-    -Uri "https://raw.githubusercontent.com/BepInEx/BepInEx/v$bepInExVersion/LICENSE" `
-    -OutFile "$bundleStaging\licenses\BepInEx-LGPL-2.1.txt"
-Invoke-WebRequest `
-    -Uri "https://raw.githubusercontent.com/NeighTools/UnityDoorstop/v4.5.0/LICENSE" `
-    -OutFile "$bundleStaging\licenses\UnityDoorstop-LGPL-2.1.txt"
+Save-GitHubLicense "BepInEx/BepInEx" "v$bepInExVersion" "$bundleStaging\licenses\BepInEx-LGPL-2.1.txt"
+Save-GitHubLicense "NeighTools/UnityDoorstop" "v4.5.0" "$bundleStaging\licenses\UnityDoorstop-LGPL-2.1.txt"
 
 $bundleZip = Join-Path $artifacts "SephiriaTogether-$Version-with-BepInEx-$bepInExVersion-win-x64.zip"
 if (Test-Path -LiteralPath $bundleZip) {

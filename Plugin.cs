@@ -22,7 +22,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.9.9";
+        public const string PluginVersion = "3.10.0";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> baseEnemyMultiplier;
@@ -318,8 +318,10 @@ namespace SephiriaTogether
 
             foreach (NetworkManager manager in Resources.FindObjectsOfTypeAll<NetworkManager>())
             {
-                manager.maxConnections = PlayerLimit.CurrentLimit;
+                if (!NetworkServer.active || manager != NetworkManager.singleton)
+                    manager.maxConnections = PlayerLimit.CurrentLimit;
             }
+            PlayerLimit.EnsureActiveCapacity();
         }
 
         private void OnDestroy() => ShutdownRuntime();
@@ -398,6 +400,7 @@ namespace SephiriaTogether
             HandleMenuShortcut();
             if (!CoopMenu.IsCapturingShortcut && !CoopMenu.IsOpen) RescueAlerts.Update();
             VersionReminder.Update();
+            VersionCompatibility.Tick();
             MoneyTransfer.Tick();
             StartProgressSelection.Tick();
             LanRoomDiscovery.Tick();
@@ -510,6 +513,7 @@ namespace SephiriaTogether
             // handlers for an already-active session as well as future callbacks.
             if (NetworkServer.active)
             {
+                PlayerLimit.EnsureActiveCapacity();
                 VersionCompatibility.RegisterServerMessages();
                 CatchUpRewards.RegisterServerMessages();
             }

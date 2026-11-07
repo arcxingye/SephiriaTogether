@@ -1,5 +1,13 @@
 # Changelog
 
+## 3.10.0
+
+- Adapt to Sephiria 1.1.2 and bind the world-map gather-distance patch to the shared resolver instead of the newly overloaded `RequestWorldMap` entry point.
+- Retry the custom version handshake for slow or late Workshop activation, preserve confirmed state across duplicate registration, and distinguish an unconfirmed peer from a reported game or Mod mismatch.
+- Synchronize the selected room capacity into the already-running Steam transport after late Workshop activation. Preserve Steam/IP/EOS room caps and expose capacity diagnostics.
+- Add 1.1.2 metadata checks and regression fixtures for both Steam transport implementations, connection lifecycle, handshake retries, world-map overloads, and room-capacity preservation.
+- Native Workshop menu opening was user-tested on 1.1.2. Remote handshake, six-player admission, and multi-Mod playthroughs still require live verification.
+
 ## 3.9.9
 
 - Add targeted compatibility for Star's SephiriaMod 2.7.4 and Backpack Organizer Workshop 3.0.0.

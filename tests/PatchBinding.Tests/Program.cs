@@ -37,7 +37,12 @@ public sealed class UI_HorizontalSelectionBox_MultiplayerNumber
 namespace SephiriaTogether
 {
     internal sealed class Setting { internal bool Value; }
-    internal static class Plugin { internal static readonly Setting allowLowerProgressPlayers = new Setting(); }
+    internal static class Plugin
+    {
+        internal static readonly Setting allowLowerProgressPlayers = new Setting();
+        internal static readonly Setting allowUngroupedStageTransition = new Setting();
+        internal static void LogInfo(string message) { }
+    }
     internal static class ThirdPartyCompatibility
     {
         internal const string StarHarmonyOwner = "stars-sephiriamod";
@@ -55,6 +60,7 @@ namespace Mirror
 {
     internal static class NetworkServer
     {
+        internal static bool active;
         internal static int maxConnections;
         internal static int Count;
         internal static bool Listening = true;
@@ -63,6 +69,26 @@ namespace Mirror
             Listening && connectionId > 0 && Count < maxConnections;
         [MethodImpl(MethodImplOptions.NoInlining)]
         internal static bool Admit(int connectionId) => IsConnectionAllowed(connectionId, "test");
+    }
+}
+
+public sealed class PlayerAvatar
+{
+    public string BaseFloorGuid;
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static float ResolveGatherDistance(float gatherDistance, bool isQuestBoard) =>
+        gatherDistance > 0f ? gatherDistance : isQuestBoard ? 3f : 10f;
+    public float RequestWorldMap(int position, int sound, bool questBoard, float distance = 0f) =>
+        RequestWorldMap(position, sound, questBoard, distance, "");
+    public float RequestWorldMap(int position, int sound, bool questBoard, float distance, string baseFloorGuid)
+    {
+        BaseFloorGuid = baseFloorGuid;
+        return ResolveGatherDistance(distance, questBoard);
+    }
+    public bool RemoteCommand(float distance, bool questBoard, string baseFloorGuid, bool inBattle, bool uiOpen, bool questComplete)
+    {
+        BaseFloorGuid = baseFloorGuid;
+        return 100f <= ResolveGatherDistance(distance, questBoard) && !inBattle && !uiOpen && questComplete;
     }
 }
 
@@ -145,6 +171,38 @@ internal static class Program
         else typeof(Harmony).GetMethod("UnpatchAll", new[] { typeof(string) }).Invoke(harmony, new object[] { harmony.Id });
     }
 
+    private static void TestWorldMapRadius()
+    {
+        var harmony = new Harmony("test.sephiriatogether.worldmap");
+        try
+        {
+            harmony.CreateClassProcessor(typeof(WorldMapGatherRequirementPatch)).Patch();
+            var avatar = new PlayerAvatar();
+            Mirror.NetworkServer.active = true;
+            Plugin.allowUngroupedStageTransition.Value = false;
+            Check(avatar.RequestWorldMap(0, 0, false) == 10f, "Disabled bypass retains the native default radius");
+            Check(avatar.RequestWorldMap(0, 0, true) == 3f, "Disabled bypass retains the quest-board radius");
+            Check(avatar.RequestWorldMap(0, 0, false, 7f) == 7f, "Disabled bypass retains explicit radii");
+            Plugin.allowUngroupedStageTransition.Value = true;
+            Check(avatar.RequestWorldMap(0, 0, false) == float.MaxValue, "Four-argument wrapper reaches the patched resolver");
+            Check(avatar.RequestWorldMap(0, 0, true, 3f, "floor-112") == float.MaxValue && avatar.BaseFloorGuid == "floor-112",
+                "Five-argument entry retains baseFloorGuid and shares the host bypass");
+            Check(avatar.RemoteCommand(3f, true, "remote-floor", false, false, true) && avatar.BaseFloorGuid == "remote-floor",
+                "Remote command shares the server radius without losing the requested floor");
+            Check(!avatar.RemoteCommand(3f, true, "floor", true, false, true), "Combat still blocks remote map requests");
+            Check(!avatar.RemoteCommand(3f, true, "floor", false, true, true), "Open UI still blocks remote map requests");
+            Check(!avatar.RemoteCommand(3f, true, "floor", false, false, false), "Incomplete quests still block remote map requests");
+            Mirror.NetworkServer.active = false;
+            Check(avatar.RequestWorldMap(0, 0, true) == 3f, "A remote client's setting cannot override the radius");
+        }
+        finally
+        {
+            UnpatchOwner(harmony);
+            Mirror.NetworkServer.active = false;
+            Plugin.allowUngroupedStageTransition.Value = false;
+        }
+    }
+
     private static void Main()
     {
         bool reproduced = false;
@@ -182,6 +240,7 @@ internal static class Program
         Check(duplicateRejected, "Fail if the Chapter anchor becomes ambiguous");
         TestCapacityOrdering(togetherFirst: false);
         TestCapacityOrdering(togetherFirst: true);
+        TestWorldMapRadius();
         Console.WriteLine($"Patch binding regression tests passed: {assertions} assertions using {typeof(Harmony).Assembly.FullName}.");
     }
 }

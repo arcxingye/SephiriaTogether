@@ -32,7 +32,7 @@ namespace SephiriaTogether
             }
 
             LobbyData lobby = manager.Lobby;
-            if (lobby.IsOwner) return;
+            if (lobby.IsOwner || VersionCompatibility.HasClientVersionReport) return;
             string gameVersion = lobby["z_heathenGameVersion"] ?? "";
             string modVersion = lobby["SephiriaTogether"] ?? "";
             string signature = gameVersion + "\n" + modVersion;
@@ -91,6 +91,13 @@ namespace SephiriaTogether
         {
             ClearWarning();
             ShownScopes.Clear();
+        }
+
+        internal static void Dismiss(string scope)
+        {
+            if (string.IsNullOrEmpty(scope)) return;
+            ShownScopes.Remove(scope);
+            if (string.Equals(warningScope, scope, StringComparison.Ordinal)) ClearWarning();
         }
 
         private static void ClearWarning()

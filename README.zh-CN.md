@@ -2,7 +2,7 @@
 
 多人联机扩展，提供房间人数设置、中途加入、断线重连、奖励补偿、敌人缩放及 IP/LAN 联机。
 
-当前版本 **3.9.9**，针对游戏 **Sephiria 1.1.1** 构建。菜单支持简体中文、繁体中文、英语、韩语和日语。
+当前版本 **3.10.0**，针对游戏 **Sephiria 1.1.2** 构建。菜单支持简体中文、繁体中文、英语、韩语和日语。
 
 ## 下载与安装
 
@@ -11,10 +11,10 @@
 | 文件 | 用途 |
 | --- | --- |
 | `SephiriaTogether.dll` | 已安装 BepInEx 5：放入 `BepInEx/plugins` |
-| `SephiriaTogether-3.9.9.zip` / `SephiriaTogether.zip` | BepInEx 插件与说明，不含框架 |
-| `SephiriaTogether-3.9.9-with-BepInEx-5.4.23.5-win-x64.zip` | Windows x64 新手整合包：解压到游戏根目录 |
-| `SephiriaTogether-3.9.9-Workshop.zip` | 原生工坊本地包：解压到游戏根目录后形成 `WorkshopLocal/SephiriaTogether`，用于本地测试/上传 |
-| `SHA256SUMS-3.9.9.txt` | 下载文件的 SHA-256 校验值 |
+| `SephiriaTogether-3.10.0.zip` / `SephiriaTogether.zip` | BepInEx 插件与说明，不含框架 |
+| `SephiriaTogether-3.10.0-with-BepInEx-5.4.23.5-win-x64.zip` | Windows x64 新手整合包：解压到游戏根目录 |
+| `SephiriaTogether-3.10.0-Workshop.zip` | 原生工坊本地包：解压到游戏根目录后形成 `WorkshopLocal/SephiriaTogether`，用于本地测试/上传 |
+| `SHA256SUMS-3.10.0.txt` | 下载文件的 SHA-256 校验值 |
 
 同一次运行只启用 Together 的一种加载版本。工坊版本身无需 BepInEx；订阅安装通过游戏内工坊面板管理。本地工坊包受游戏原生联机限制，不能把本地测试通过视为订阅版已获审核批准。
 
@@ -47,15 +47,17 @@
 
 默认 TCP 端口为 **7777**，局域网发现使用 UDP **7780**。直连可输入 `IP:端口`。
 
-## 3.9.9 的重点更新
+## 3.10.0 的重点更新
 
-- 适配游戏 1.1.1 与工坊加载流程，修复启动补丁方法歧义及 F8 初始化问题。
+- 适配游戏 1.1.2 与工坊加载流程，修复世界地图重载绑定及 F8 初始化问题。
+- 延长并重试联机版本握手，把“尚未确认”与真正的游戏/Mod 版本不一致分开提示。
+- 同步已运行 Steam 传输实例的人数上限，修复工坊晚加载后房间仍停留在旧人数限制的问题。
 - 提供独立的原生工坊构建；保留 BepInEx 构建。
 - 网络设置区分当前连接与已保存配置，支持回标题后双向切换通信方式。
 - 增加已知快捷键冲突避让、房间人数协调和特殊玩法保护。
 - 工坊发布元数据包含中文默认介绍及英文介绍。
 
-两种构建、补丁静态校验及针对性回归测试已通过。原生菜单和单人会话的双向通信切换已由用户实测并通过日志核实；完整多 Mod、双机联机回归仍待完成。兼容技术范围见 [COMPATIBILITY.md](COMPATIBILITY.md)，加载设计见 [DESIGN.md](DESIGN.md)。
+两种构建、补丁静态校验及针对性回归测试已通过。用户已确认 1.1.2 下部署的 3.10.0 原生工坊版菜单可以打开；此前 3.9.8 的单人双向通信切换也已有实测。本次双机握手、第六人加入和多 Mod 组合仍需游戏内验证。兼容技术范围见 [COMPATIBILITY.md](COMPATIBILITY.md)，加载设计见 [DESIGN.md](DESIGN.md)。
 
 ## 问题反馈
 
@@ -71,7 +73,7 @@
 $env:SEPHIRIA_DIR = "你的 Sephiria 游戏目录"
 .\scripts\build.ps1
 .\scripts\build-workshop.ps1
-.\scripts\package.ps1 -Version 3.9.9 -IncludeWorkshop
+.\scripts\package.ps1 -Version 3.10.0 -IncludeWorkshop
 ```
 
 MIT 许可证，详见 [LICENSE](LICENSE)。

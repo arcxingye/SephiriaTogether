@@ -78,7 +78,7 @@ namespace SephiriaTogether
             maxPlayers = Mathf.Clamp(maxPlayers, 2, PlayerLimit.CurrentLimit);
             if (gameMode != null && gameMode.maxPlayers > 0)
                 maxPlayers = Math.Min(maxPlayers, gameMode.maxPlayers);
-            PlayerLimit.ApplyServerCapacity(maxPlayers);
+            PlayerLimit.ApplyServerCapacity(maxPlayers, "IP room");
             lobbyGeneration++;
             restorePendingGeneration = -1;
             created = true;

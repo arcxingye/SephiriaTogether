@@ -9,23 +9,6 @@ using UnityEngine;
 
 namespace SephiriaTogether
 {
-    [HarmonyPatch(typeof(PlayerAvatar), nameof(PlayerAvatar.RequestWorldMap))]
-    internal static class WorldMapGatherRequirementPatch
-    {
-        private static void Prefix(ref float gatherDistance)
-        {
-            if (!NetworkServer.active || !Plugin.allowUngroupedStageTransition.Value)
-            {
-                return;
-            }
-
-            // The game now passes the gather radius in, so raise it instead of
-            // temporarily moving living player transforms to the entrance.
-            gatherDistance = float.MaxValue;
-            Plugin.LogInfo("Bypassing world-map gather distance.");
-        }
-    }
-
     [HarmonyPatch]
     internal static class StageEntranceSessionCheckPatch
     {

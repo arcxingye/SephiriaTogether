@@ -6,6 +6,8 @@ A multiplayer framework for Sephiria. It provides Steam lobbies, TCP/IP rooms fo
 
 The F8 menu follows the game's active language for Simplified Chinese, Traditional Chinese, English, Korean and Japanese. Other languages fall back to English.
 
+Current version: **3.10.0 for Sephiria 1.1.2**. Download links point to the latest published release.
+
 ## Default scaling
 
 - 1-4 players: no change beyond Sephiria's original scaling.
@@ -40,8 +42,8 @@ Download links:
 
 - [Latest Release](https://github.com/arcxingye/SephiriaTogether/releases/latest)
 - [Latest plugin ZIP](https://github.com/arcxingye/SephiriaTogether/releases/latest/download/SephiriaTogether.zip)
-- `SephiriaTogether-3.9.9-Workshop.zip` on the release page is the native local-test/upload package; it extracts into `WorkshopLocal/SephiriaTogether` and is subject to the game's local-package restrictions.
-- `SHA256SUMS-3.9.9.txt` lists checksums for release downloads.
+- `SephiriaTogether-<version>-Workshop.zip` is the native local-test/upload package; it extracts into `WorkshopLocal/SephiriaTogether` and is subject to the game's local-package restrictions.
+- `SHA256SUMS-<version>.txt` lists checksums for release downloads.
 
 The F8 menu's Diagnostics tab also opens the Release page and plugin ZIP links. The beginner package remains available from the Latest Release page for first-time installations.
 
@@ -56,7 +58,7 @@ See `INSTALL.md` for bilingual beginner instructions, or [README.zh-CN.md](READM
 
 The native package is produced by `scripts/build-workshop.ps1` under `artifacts/WorkshopLocal/SephiriaTogether`. Put the folder in the game's `WorkshopLocal` directory to inspect/upload it through the official Workshop panel. The DLL contains a public `SephiriaTogether.WorkshopEntry` entry and needs no BepInEx runtime. Native settings are saved through the game's `ModOptions` in device options; they are independent of the BepInEx `.cfg`. Recheck your F8 settings when switching loaders. See the [Workshop guide](https://github.com/arcxingye/SephiriaTogether/blob/main/workshop/README.md) for upload and testing instructions.
 
-**Native-loader timing:** in Sephiria 1.1.1, Workshop DLL activation happens in `GameDataLoader.Awake` when entering a save. F8 is therefore unavailable on the first title screen of a fresh game launch. The Workshop runtime persists after activation; returning to the title does not intentionally destroy it. The BepInEx build initializes at process startup and retains first-title-screen access. The `OnTitleMenuReady` event alone cannot start an unloaded Workshop DLL.
+**Native-loader timing:** in Sephiria 1.1.2, Workshop DLL activation happens in `GameDataLoader.Awake` when entering a save. F8 is therefore unavailable on the first title screen of a fresh game launch. The Workshop runtime persists after activation; returning to the title does not intentionally destroy it. The BepInEx build initializes at process startup and retains first-title-screen access. The `OnTitleMenuReady` event alone cannot start an unloaded Workshop DLL.
 
 ### Session preparation
 
@@ -167,7 +169,7 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
- .\scripts\package.ps1 -Version 3.9.9 -IncludeWorkshop
+ .\scripts\package.ps1 -Version 3.10.0 -IncludeWorkshop
 ```
 
 This creates a standalone BepInEx DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. `-IncludeWorkshop` also builds the separately named native Workshop ZIP; upload tickets and review proofs are excluded. SHA-256 checksums are generated for the assets. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.
@@ -186,12 +188,13 @@ Run the adapter/policy tests (.NET SDK 9) and patch regression tests (.NET Frame
 
 ```powershell
 dotnet run --project tests/WorkshopSupport.Tests/WorkshopSupport.Tests.csproj -c Release
+dotnet run --project tests/NetworkSession.Tests/NetworkSession.Tests.csproj -c Release
 dotnet run --project tests/PatchBinding.Tests/PatchBinding.Tests.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR"
 ```
 
 ## Compatibility
 
-- Built and statically checked against Sephiria 1.1.1 (Workshop update), Unity Mono, Windows x64. Native F8 and the 3.9.8 single-host IP/native return-to-title switching flow were user-tested and confirmed in Player.log. Remote multiplayer regression testing is still needed for this update.
+- Built and statically checked against Sephiria 1.1.2 (Workshop update), Unity Mono, Windows x64. The 1.1.2 world-map overload, handshake lifecycle, and Steam transport-capacity paths have executable regression coverage. The user confirmed the deployed 3.10.0 native Workshop menu opens. Remote handshake, six-player admission, and multi-Mod multiplayer behavior still need live verification.
 - The BepInEx build requires BepInEx 5 and is installed under `BepInEx/plugins`. The native build loads through `WorkshopModBase` and the game's official Workshop UI.
 - Enable one loader build at a time, then restart. The native entry refuses duplicate loading, including older BepInEx instances, to avoid applying rewards/scaling twice.
 - Steam joining retains the native Workshop package/version/load-order checks and the host-only-Mod notice. `AllowLowerProgressPlayers` affects story progress only. Native restrictions on loaded local Workshop packages also apply to IP creation/joining.

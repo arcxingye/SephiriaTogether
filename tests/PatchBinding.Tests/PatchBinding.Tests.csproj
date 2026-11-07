@@ -15,6 +15,7 @@
   <ItemGroup>
     <Compile Include="..\..\SteamJoinProgressPatch.cs" Link="Production\SteamJoinProgressPatch.cs" />
     <Compile Include="..\..\StarCapacityCompatibility.cs" Link="Production\StarCapacityCompatibility.cs" />
+    <Compile Include="..\..\WorldMapGatherRequirementPatch.cs" Link="Production\WorldMapGatherRequirementPatch.cs" />
     <Reference Include="0Harmony"><HintPath>$(HarmonyPath)</HintPath></Reference>
     <Reference Include="MonoMod.Utils" Condition="Exists('$(HarmonyDirectory)\MonoMod.Utils.dll')">
       <HintPath>$(HarmonyDirectory)\MonoMod.Utils.dll</HintPath>

@@ -1,7 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$GameDir = $env:SEPHIRIA_DIR,
-    [string]$PackageRoot = ""
+    [string]$PackageRoot = "",
+    # Allows validation of source metadata + a built DLL without making a package.
+    [string]$PluginPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -12,6 +14,19 @@ $PackageRoot = [System.IO.Path]::GetFullPath($PackageRoot)
 $metadataPath = Join-Path $PackageRoot "metadata.json"
 if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { throw "Missing metadata.json" }
 $metadata = [System.IO.File]::ReadAllText($metadataPath) | ConvertFrom-Json
+if ($metadata.info.description.default -isnot [string] -or $metadata.info.description.'en-US' -isnot [string]) {
+    throw "Expected localized default and en-US descriptions."
+}
+$descriptionPath = Join-Path $repoRoot "workshop\description.zh-CN.txt"
+$description = [System.IO.File]::ReadAllText($descriptionPath).Replace("`r`n", "`n").TrimEnd()
+if ($metadata.info.description.default.Replace("`r`n", "`n").TrimEnd() -cne $description) {
+    throw "Chinese Workshop description and metadata differ."
+}
+foreach ($text in @($metadata.info.description.default, $metadata.info.description.'en-US')) {
+    if ($text -match '(?i)stars-sephiriamod|Star.s Sephiria|Backpack Organizer|SephiriaBackpackOrganizer') {
+        throw "Public Workshop descriptions must not name third-party Mods."
+    }
+}
 if ($metadata.mod.schemaVersion -ne 1 -or $metadata.mod.modId -cne "com.sephiriamods.sephiriatogether" -or
     $metadata.mod.multiplayer.installation -cne "host_only") { throw "Unexpected Workshop identity/schema/installation mode." }
 if ([string]::IsNullOrWhiteSpace($metadata.info.title)) { throw "Workshop title is required." }
@@ -29,7 +44,7 @@ if ($png.Length -lt 24 -or [BitConverter]::ToString($png, 0, 8) -cne "89-50-4E-4
 $cecil = Join-Path $GameDir "BepInEx\core\Mono.Cecil.dll"
 if (-not (Test-Path -LiteralPath $cecil -PathType Leaf)) { throw "Validation requires a development copy of Mono.Cecil.dll under BepInEx/core." }
 [void][System.Reflection.Assembly]::Load([System.IO.File]::ReadAllBytes($cecil))
-$dllPath = Join-Path $PackageRoot "SephiriaTogether.Workshop.dll"
+$dllPath = if ([string]::IsNullOrWhiteSpace($PluginPath)) { Join-Path $PackageRoot "SephiriaTogether.Workshop.dll" } else { [System.IO.Path]::GetFullPath($PluginPath) }
 $native = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($dllPath)
 $harmony = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $GameDir "Sephiria_Data\Managed\0Harmony.dll"))
 $legacy = $null

@@ -1681,11 +1681,12 @@ namespace SephiriaTogether
                    string.Format(MenuText.Get("RuleGameVersion"), Application.version) + "\n" +
                    string.Format(MenuText.Get("DiagnosticServer"), OnOff(NetworkServer.active)) + "\n" +
                    string.Format(MenuText.Get("DiagnosticClient"), OnOff(NetworkClient.active)) + "\n" +
-                   string.Format(MenuText.Get("DiagnosticHandshake"), connection != null ? OnOff(true) : MenuText.Get("Host")) + "\n" +
+                    string.Format(MenuText.Get("DiagnosticHandshake"), connection != null ? OnOff(VersionCompatibility.IsProtocolCompatibleConnection(connection)) : MenuText.Get("Host")) + "\n" +
                    string.Format(MenuText.Get("DiagnosticConnection"), connection != null ? connection.connectionId.ToString() : "-") + "\n" +
                    string.Format(MenuText.Get("DiagnosticPlayer"), identity) + "\n" +
                    string.Format(MenuText.Get("DiagnosticFloor"), FloorDisplay.Format(floor)) + "\n" +
-                    string.Format(MenuText.Get("DiagnosticPlayers"), Plugin.PlayerCount) + "\n" +
+                     string.Format(MenuText.Get("DiagnosticPlayers"), Plugin.PlayerCount) + "\n" +
+                     PlayerLimit.Diagnostics + "\n" +
                     string.Format(MenuText.Get("RuleAntiCheat"), OnOff(Plugin.antiCheat.Value)) + "\n" +
                     BuildOriginalScalingSummary();
         }

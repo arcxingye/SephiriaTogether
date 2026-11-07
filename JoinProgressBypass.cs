@@ -57,7 +57,7 @@ namespace SephiriaTogether
         {
             // Workshop activation can follow Mirror.Listen. Apply the actual
             // room cap to the already-listening server, including custom modes.
-            PlayerLimit.ApplyServerCapacity(data.MaxMembers);
+            PlayerLimit.ApplyServerCapacity(data.MaxMembers, "Steam room");
             data["pw"] = "open";
             data["SephiriaTogether"] = Plugin.PluginVersion;
             HorayNetworkAuthenticator.allowConnection = true;

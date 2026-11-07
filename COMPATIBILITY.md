@@ -1,7 +1,8 @@
-# Compatibility audit — Together 3.9.9
+# Compatibility audit — Together 3.10.0
 
-Audited against game **1.1.1**, Star's SephiriaMod **2.7.4** (Workshop
-`3829559495`) and Backpack Organizer Workshop **3.0.0** (`3830579017`).
+Together's game targets were rechecked against **1.1.2**. The external audit
+below covers Star's SephiriaMod **2.7.4** (Workshop `3829559495`) and Backpack
+Organizer Workshop **3.0.0** (`3830579017`), originally inspected on game 1.1.1.
 The external assemblies were inspected read-only; no external DLL, config,
 Workshop manifest, or approval record was modified or bundled.
 
@@ -44,6 +45,10 @@ scoring errors to its maintainer. No scoring code is copied into Together.
   restores that cap before the original Mirror admission check. The original
   listening/ID/count validation still executes. The player-limit dropdown also
   runs after Star's fixed-50 dropdown adjustment. Custom-game caps are retained.
+- The 1.1.2 Steam transport copies the manager limit into a private
+  `NextServer` or `LegacyServer` field when it starts. Together updates that live
+  field after late Workshop activation as well as the Mirror cap, so a room does
+  not remain stuck at the startup default. The Diagnostics tab shows both caps.
 - Star's Boss Rush / Infinite Mode are represented in its hard-mode environment,
   not necessarily `CustomGameLauncher.Current`. Together recognizes these flags
   only when Star is active and disables its story-progress picker in those modes.
@@ -89,4 +94,5 @@ Required live verification before claiming full compatibility:
    separately test late joins, reward objects and reconnect in those modes.
 
 Current scope is targeted compatibility changes plus static/executable-fixture
-verification, not a completed three-Mod multiplayer playthrough.
+verification, not a completed three-Mod multiplayer playthrough. Two-peer and
+six-player behavior still needs live verification with the reviewed 1.1.2 build.

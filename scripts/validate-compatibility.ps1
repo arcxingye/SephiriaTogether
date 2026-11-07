@@ -234,6 +234,46 @@ try {
         $_.Operand.Parameters.Count -eq 4
     })) { $failures.Add("RestartGame wrapper no longer forwards to the four-argument target") }
 
+    $avatar = $game.GetType("PlayerAvatar")
+    $mapWrapper = @($avatar.Methods | Where-Object { $_.Name -eq "RequestWorldMap" -and $_.Parameters.Count -eq 4 })
+    if ($mapWrapper.Count -ne 1 -or -not ($mapWrapper[0].Body.Instructions | Where-Object {
+        $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq "RequestWorldMap" -and
+        $_.Operand.Parameters.Count -eq 5
+    })) { $failures.Add("RequestWorldMap wrapper no longer forwards to the five-argument implementation") }
+    $mapPaths = @($avatar.Methods | Where-Object {
+        ($_.Name -eq "RequestWorldMap" -and $_.Parameters.Count -eq 5) -or
+        $_.Name -eq "UserCode_CmdRequestWorldMap__Vector3__Int32__Boolean__Single__String"
+    })
+    if ($mapPaths.Count -ne 2) { $failures.Add("World-map host/remote implementation signatures changed") }
+    foreach ($method in $mapPaths) {
+        if (-not ($method.Body.Instructions | Where-Object {
+            $_.Operand -is [Mono.Cecil.MethodReference] -and $_.Operand.Name -eq "ResolveGatherDistance" -and
+            $_.Operand.DeclaringType.FullName -eq "PlayerAvatar"
+        })) { $failures.Add("World-map path no longer uses the shared radius resolver: $($method.Name)") }
+    }
+
+    # Late Workshop activation must update the capacity copied into Fizzy's
+    # live server. Neither this field nor its two implementations is a public API.
+    $fizzy = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $managed "FizzySteamworks.dll"))
+    $assemblies["FizzySteamworks"] = $fizzy
+    $transport = $fizzy.MainModule.GetType("Mirror.FizzySteam.FizzySteamworks")
+    $liveServer = Find-Field $transport "server"
+    if ($null -eq $liveServer -or -not $liveServer.IsStatic -or $liveServer.FieldType.FullName -cne "Mirror.FizzySteam.IServer") {
+        $failures.Add("FizzySteamworks live server field changed")
+    } else { $reflectionCount++ }
+    foreach ($serverName in @("Mirror.FizzySteam.NextServer", "Mirror.FizzySteam.LegacyServer")) {
+        $serverType = $fizzy.MainModule.GetType($serverName)
+        $capacity = Find-Field $serverType "maxConnections"
+        if ($null -eq $capacity -or $capacity.IsStatic -or $capacity.FieldType.FullName -cne "System.Int32") {
+            $failures.Add("$serverName capacity field changed")
+        } else { $reflectionCount++ }
+        $admissionName = if ($serverName.EndsWith("NextServer")) { "OnConnectionStatusChanged" } else { "OnReceiveInternalData" }
+        $admission = @(Find-Methods $serverType $admissionName)
+        if ($admission.Count -ne 1 -or -not ($admission[0].Body.Instructions | Where-Object {
+            $_.OpCode.Code -eq "Ldfld" -and $_.Operand.Name -eq "maxConnections"
+        })) { $failures.Add("$serverName admission no longer reads maxConnections") }
+    }
+
     # Organizer 3.0.0 uses these native operations for both forward apply and
     # rollback. They must remain outside the direct-write anti-cheat filters.
     $organizerCommands = @("UserCode_CmdSwap__SByte__SByte__SByte__SByte", "UserCode_CmdDoClickAction__ItemPosition")
@@ -255,7 +295,7 @@ try {
     }
     Write-Output "HARMONY METADATA VALIDATION PASSED"
     Write-Output "Targets: $targetCount; injected arguments: $parameterCount"
-    Write-Output "Reflected members: $reflectionCount; join/create transpiler anchors and restart forwarding: verified"
+    Write-Output "Reflected members: $reflectionCount; join/create anchors, restart/world-map forwarding and Steam transport capacity: verified"
     Write-Output "Organizer native swap/rotate commands: present and outside direct-write anti-cheat filters"
     Write-Output "Metadata inspection only; does not execute Unity or prove runtime behavior."
 }
