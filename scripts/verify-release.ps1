@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([string]$Version = "3.10.0")
+param([string]$Version = "3.10.1")
 
 $ErrorActionPreference = "Stop"
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))

@@ -69,6 +69,22 @@ function Test-Assignable($expected, $actual) {
     return $false
 }
 
+function Test-CallSite($methods, [string]$declaringType, [string]$methodName) {
+    $candidates = @($methods)
+    if ($candidates.Count -ne 1 -or -not $candidates[0].HasBody) {
+        $failures.Add("Missing/ambiguous caller for $declaringType.$methodName")
+        return
+    }
+    $calls = @($candidates[0].Body.Instructions | Where-Object {
+        $_.OpCode.Code -in @("Call", "Callvirt") -and
+        $_.Operand -is [Mono.Cecil.MethodReference] -and
+        $_.Operand.DeclaringType.FullName -ceq $declaringType -and $_.Operand.Name -ceq $methodName
+    })
+    if ($calls.Count -ne 1) {
+        $failures.Add("$($candidates[0].FullName): call to $declaringType.$methodName matches=$($calls.Count)")
+    }
+}
+
 try {
     $plugin = [Mono.Cecil.AssemblyDefinition]::ReadAssembly($PluginPath)
     $assemblies[$plugin.Name.Name] = $plugin
@@ -252,6 +268,43 @@ try {
         })) { $failures.Add("World-map path no longer uses the shared radius resolver: $($method.Name)") }
     }
 
+    # These transpilers/lifecycle hooks can still bind when the instructions
+    # they rely on change. Check the native call sites as well as signatures.
+    $attack = @(Find-Methods ($game.GetType("CombatManager")) "AttackEvent")
+    Test-CallSite $attack "UnitAvatar" "HealPercent"
+    Test-CallSite $attack "UnitAvatar" "RpcBloodFestivalHealFx"
+    Test-CallSite @(Find-Methods ($game.GetType("GameDataLoader")) "Awake") "WorkshopModRuntime" "ActivateFromManager"
+
+    # 1.1.3 records Boss timing in both the skipped and normal intro paths.
+    # Together's vote hooks must continue through native death/clear handling.
+    $boss = $game.GetType("BossSpawner")
+    Test-CallSite @(Find-Methods $boss "Update") "BossSpawner" "ServerMarkBattleStart"
+    $intro = @(Find-Methods $boss "EnterEventCoroutineServerside")
+    $stateMachine = @($intro.CustomAttributes | Where-Object {
+        $_.AttributeType.FullName -ceq "System.Runtime.CompilerServices.IteratorStateMachineAttribute"
+    })
+    if ($stateMachine.Count -ne 1) {
+        $failures.Add("Boss intro iterator state machine missing/ambiguous")
+    } else {
+        $iterator = $game.GetType($stateMachine[0].ConstructorArguments[0].Value.FullName)
+        Test-CallSite @(Find-Methods $iterator "MoveNext") "BossSpawner" "ServerMarkBattleStart"
+    }
+    foreach ($methodName in @("OnFinalDeath", "ServerBeginBossDramaticDie")) {
+        Test-CallSite @(Find-Methods $boss $methodName) "BossSpawner" "ServerMarkBossDown"
+    }
+    Test-CallSite @(Find-Methods $boss "ServerEndBossDramaticDie") "BossSpawner" "ClearBoss"
+    Test-CallSite @(Find-Methods $boss "ClearBoss") "BossSpawner" "ServerRecordBossKill"
+    $history = Find-Field ($game.GetType("DungeonManager")) "bossKillRecords"
+    if ($null -eq $history -or $history.FieldType.FullName -cne 'System.Collections.Generic.List`1<RunHistoryBossData>') {
+        $failures.Add("DungeonManager Boss history field changed")
+    }
+    foreach ($methodName in @("LoadDungeon", "SaveCurrentSessionData")) {
+        $methods = @(Find-Methods ($game.GetType("DungeonManager")) $methodName)
+        if ($methods.Count -ne 1 -or -not ($methods[0].Body.Instructions | Where-Object {
+            $_.OpCode.Code -eq "Ldstr" -and $_.Operand -ceq "BossKillRecords"
+        })) { $failures.Add("Boss history persistence key missing: DungeonManager.$methodName") }
+    }
+
     # Late Workshop activation must update the capacity copied into Fizzy's
     # live server. Neither this field nor its two implementations is a public API.
     $fizzy = [Mono.Cecil.AssemblyDefinition]::ReadAssembly((Join-Path $managed "FizzySteamworks.dll"))
@@ -296,6 +349,7 @@ try {
     Write-Output "HARMONY METADATA VALIDATION PASSED"
     Write-Output "Targets: $targetCount; injected arguments: $parameterCount"
     Write-Output "Reflected members: $reflectionCount; join/create anchors, restart/world-map forwarding and Steam transport capacity: verified"
+    Write-Output "Combat lifesteal anchors, Workshop activation and 1.1.3 Boss history paths: verified"
     Write-Output "Organizer native swap/rotate commands: present and outside direct-write anti-cheat filters"
     Write-Output "Metadata inspection only; does not execute Unity or prove runtime behavior."
 }

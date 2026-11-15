@@ -22,7 +22,7 @@ namespace SephiriaTogether
     {
         public const string PluginGuid = "com.sephiriamods.sephiriatogether";
         public const string PluginName = "Sephiria Together";
-        public const string PluginVersion = "3.10.0";
+        public const string PluginVersion = "3.10.1";
 
         private static ConfigEntry<int> scalingStartsAbove;
         private static ConfigEntry<float> baseEnemyMultiplier;

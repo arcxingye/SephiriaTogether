@@ -1,10 +1,28 @@
-# Compatibility audit — Together 3.10.0
+# Compatibility audit — Together 3.10.1
 
-Together's game targets were rechecked against **1.1.2**. The external audit
+Together's game targets were rechecked against **1.1.3**. The external audit
 below covers Star's SephiriaMod **2.7.4** (Workshop `3829559495`) and Backpack
 Organizer Workshop **3.0.0** (`3830579017`), originally inspected on game 1.1.1.
 The external assemblies were inspected read-only; no external DLL, config,
 Workshop manifest, or approval record was modified or bundled.
+
+## Sephiria 1.1.3
+
+- Audited game `Assembly-CSharp.dll` SHA-256:
+  `1595C389D2314B5991B10D00920C904AE4B6EFFE58061089BB7BBBAECAAA579C`.
+- All 136 Harmony targets, 147 injected arguments and 29 reflected members
+  still match. The native admission, world-map, reconnect, inventory and reward
+  paths used by Together retain their 1.1.2 signatures.
+- Boss combat now records start/down timestamps and persists kill records.
+  Together's vote hooks continue through the native intro/death/clear methods;
+  validation covers both intro paths, clear recording and the run-save key.
+- The combat change exposes session peace mode; existing combat methods and the
+  lifesteal transpiler's two call sites still match. Weapon additions and the
+  item-box sorting API removal do not require new Together runtime hooks.
+- The Workshop UI changes warning presentation; activation still happens in
+  `GameDataLoader.Awake`. Existing verification and package admission remain native.
+- Both loader builds and automated regressions target 1.1.3. In-game startup,
+  Boss record persistence and multiplayer acceptance still require live testing.
 
 ## Backpack Organizer
 
@@ -45,7 +63,7 @@ scoring errors to its maintainer. No scoring code is copied into Together.
   restores that cap before the original Mirror admission check. The original
   listening/ID/count validation still executes. The player-limit dropdown also
   runs after Star's fixed-50 dropdown adjustment. Custom-game caps are retained.
-- The 1.1.2 Steam transport copies the manager limit into a private
+- The 1.1.3 Steam transport copies the manager limit into a private
   `NextServer` or `LegacyServer` field when it starts. Together updates that live
   field after late Workshop activation as well as the Mirror cap, so a room does
   not remain stuck at the startup default. The Diagnostics tab shows both caps.
@@ -95,4 +113,5 @@ Required live verification before claiming full compatibility:
 
 Current scope is targeted compatibility changes plus static/executable-fixture
 verification, not a completed three-Mod multiplayer playthrough. Two-peer and
-six-player behavior still needs live verification with the reviewed 1.1.2 build.
+six-player behavior still needs live verification with the 1.1.3 build and an
+appropriate subscribed/approved Workshop package setup.

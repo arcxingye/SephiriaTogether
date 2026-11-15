@@ -1,5 +1,12 @@
 # Changelog
 
+## 3.10.1
+
+- Rebuild both loader variants against Sephiria 1.1.3 and refresh the native Workshop metadata.
+- Audit the 1.1.3 combat, weapon, Boss timing, run-history, item-box and Workshop UI changes against Together's hooks. Existing runtime hooks remain compatible; no replacement gameplay hooks are needed for this update.
+- Extend compatibility validation to cover combat lifesteal call sites, native Workshop activation, and the new Boss timing/clear/persistence paths, including the intro coroutine and skip path.
+- Run handshake regression cases with game 1.1.3 and verify that a 1.1.2 report cannot authorize custom features. In-game loading and multiplayer verification on 1.1.3 are still pending.
+
 ## 3.10.0
 
 - Adapt to Sephiria 1.1.2 and bind the world-map gather-distance patch to the shared resolver instead of the newly overloaded `RequestWorldMap` entry point.

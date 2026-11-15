@@ -4,7 +4,7 @@
 
 Both binaries compile the same gameplay rules, reward bookkeeping, UI and custom
 message layouts. Loader adapters own startup, logging and configuration storage.
-The BepInEx adapter runs at process startup. In Sephiria 1.1.2, the native adapter
+The BepInEx adapter runs at process startup. In Sephiria 1.1.3, the native adapter
 runs only when `GameDataLoader.Awake` activates Workshop DLLs after entering a save.
 These are not interchangeable startup guarantees.
 
@@ -52,7 +52,7 @@ target ports are cleared on disconnect and never replace the persisted default.
 ## Other activation-sensitive features
 
 - Room capacity is applied to `NetworkServer.maxConnections` on server startup
-  and room creation. Together also updates the 1.1.2 Steam transport's live
+  and room creation. Together also updates the 1.1.3 Steam transport's live
   private `NextServer`/`LegacyServer` capacity after late Workshop
   activation; changing only `NetworkManager.maxConnections` after
   `Mirror.Listen` would leave an old admission cap. IP and EOS creation apply
@@ -78,9 +78,13 @@ transition blockers. Patch regression tests execute the production Steam join
 transpiler and world-map radius patch through real Harmony against overloaded
 fixtures. Network-session tests execute the production handshake and capacity
 code with simulated time, connections and both Steam server layouts. Metadata
-checks inspect the actual game's entry points and private fields.
+checks inspect the actual game's entry points and private fields. The 1.1.3
+audit also checks combat lifesteal call sites, Workshop activation and native
+Boss timing/history paths. Boss vote hooks keep executing the original intro,
+death and clear methods that record these timings.
 
 The automated checks alone do not prove socket or scene-lifecycle behavior.
+Together 3.10.1 targets game 1.1.3; in-game verification of this build is pending.
 On 2026-11-08 the user confirmed the deployed 3.10.0 native Workshop menu opens
 on game 1.1.2. This verifies menu availability, not remote handshake or capacity.
 On 2026-11-01 the user completed the live 3.9.8 native acceptance flow in both

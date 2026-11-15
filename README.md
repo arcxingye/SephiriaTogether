@@ -6,7 +6,7 @@ A multiplayer framework for Sephiria. It provides Steam lobbies, TCP/IP rooms fo
 
 The F8 menu follows the game's active language for Simplified Chinese, Traditional Chinese, English, Korean and Japanese. Other languages fall back to English.
 
-Current version: **3.10.0 for Sephiria 1.1.2**. Download links point to the latest published release.
+Current version: **3.10.1 for Sephiria 1.1.3**. Download links point to the latest published release.
 
 ## Default scaling
 
@@ -58,7 +58,7 @@ See `INSTALL.md` for bilingual beginner instructions, or [README.zh-CN.md](READM
 
 The native package is produced by `scripts/build-workshop.ps1` under `artifacts/WorkshopLocal/SephiriaTogether`. Put the folder in the game's `WorkshopLocal` directory to inspect/upload it through the official Workshop panel. The DLL contains a public `SephiriaTogether.WorkshopEntry` entry and needs no BepInEx runtime. Native settings are saved through the game's `ModOptions` in device options; they are independent of the BepInEx `.cfg`. Recheck your F8 settings when switching loaders. See the [Workshop guide](https://github.com/arcxingye/SephiriaTogether/blob/main/workshop/README.md) for upload and testing instructions.
 
-**Native-loader timing:** in Sephiria 1.1.2, Workshop DLL activation happens in `GameDataLoader.Awake` when entering a save. F8 is therefore unavailable on the first title screen of a fresh game launch. The Workshop runtime persists after activation; returning to the title does not intentionally destroy it. The BepInEx build initializes at process startup and retains first-title-screen access. The `OnTitleMenuReady` event alone cannot start an unloaded Workshop DLL.
+**Native-loader timing:** in Sephiria 1.1.3, Workshop DLL activation happens in `GameDataLoader.Awake` when entering a save. F8 is therefore unavailable on the first title screen of a fresh game launch. The Workshop runtime persists after activation; returning to the title does not intentionally destroy it. The BepInEx build initializes at process startup and retains first-title-screen access. The `OnTitleMenuReady` event alone cannot start an unloaded Workshop DLL.
 
 ### Session preparation
 
@@ -169,7 +169,7 @@ dotnet build SephiriaTogether.csproj -c Release -p:GameDir="$env:SEPHIRIA_DIR" -
 Create GitHub Release assets locally:
 
 ```powershell
- .\scripts\package.ps1 -Version 3.10.0 -IncludeWorkshop
+ .\scripts\package.ps1 -Version 3.10.1 -IncludeWorkshop
 ```
 
 This creates a standalone BepInEx DLL, a plugin-only ZIP, and a beginner ZIP containing the official BepInEx 5.4.23.5 Windows x64 distribution. `-IncludeWorkshop` also builds the separately named native Workshop ZIP; upload tickets and review proofs are excluded. SHA-256 checksums are generated for the assets. The script verifies the official BepInEx archive SHA-256 and includes its LGPL-2.1 license. Game assemblies are never included.
@@ -194,7 +194,7 @@ dotnet run --project tests/PatchBinding.Tests/PatchBinding.Tests.csproj -c Relea
 
 ## Compatibility
 
-- Built and statically checked against Sephiria 1.1.2 (Workshop update), Unity Mono, Windows x64. The 1.1.2 world-map overload, handshake lifecycle, and Steam transport-capacity paths have executable regression coverage. The user confirmed the deployed 3.10.0 native Workshop menu opens. Remote handshake, six-player admission, and multi-Mod multiplayer behavior still need live verification.
+- Built and statically checked against Sephiria 1.1.3, Unity Mono, Windows x64. World-map overloads, handshake lifecycle and Steam transport-capacity paths have executable regression coverage; metadata checks also cover combat lifesteal, native Workshop activation and the new Boss timing/history paths. In-game loading, remote handshake, six-player admission and multi-Mod behavior on 1.1.3 still need live verification. The earlier user-confirmed menu test was Together 3.10.0 on game 1.1.2.
 - The BepInEx build requires BepInEx 5 and is installed under `BepInEx/plugins`. The native build loads through `WorkshopModBase` and the game's official Workshop UI.
 - Enable one loader build at a time, then restart. The native entry refuses duplicate loading, including older BepInEx instances, to avoid applying rewards/scaling twice.
 - Steam joining retains the native Workshop package/version/load-order checks and the host-only-Mod notice. `AllowLowerProgressPlayers` affects story progress only. Native restrictions on loaded local Workshop packages also apply to IP creation/joining.

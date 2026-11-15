@@ -1,6 +1,6 @@
 # Sephiria Together — native Workshop build
 
-Targets Sephiria **1.1.2**, Windows x64 / Unity Mono. Version **3.10.0**.
+Targets Sephiria **1.1.3**, Windows x64 / Unity Mono. Version **3.10.1**.
 
 ## 本地检查与上传
 
@@ -36,7 +36,7 @@ Steam 文件上传与游戏 DLL 审核提交是两个阶段。在此前已排查
 - 进入游戏后按 **F8** 打开菜单；默认求救键为 **R**，可在 F8 菜单修改。
 - 背包整理也使用 F8 时，Together 菜单临时使用 **F9**，以游戏提示/诊断页为准；不会修改双方保存的快捷键。只启用一个背包整理版本。
 - Star's SephiriaMod 2.7.4 需要全员安装。Together 保持创建时的房间人数上限；Star 的 Boss Rush／无限模式会暂停 Together 的主线进度切换。背包整理 3.0.0 使用交换/旋转命令，无需关闭 Together 反作弊；新增物品的评分由整理 Mod 决定。完整三 Mod 联机回归尚待完成。
-- 游戏 1.1.2 的工坊 DLL 在进入存档时才加载。冷启动后的首次主菜单不会响应工坊版 F8；`OnTitleMenuReady` 事件不能让尚未加载的 DLL 提前运行。组件激活后会常驻，返回标题不会主动销毁它。需要首次标题页配置时应使用启动阶段加载的 BepInEx 版。
+- 游戏 1.1.3 的工坊 DLL 在进入存档时才加载。冷启动后的首次主菜单不会响应工坊版 F8；`OnTitleMenuReady` 事件不能让尚未加载的 DLL 提前运行。组件激活后会常驻，返回标题不会主动销毁它。需要首次标题页配置时应使用启动阶段加载的 BepInEx 版。
 - 工坊版通过游戏的 `ModOptions` 保存设置，使用本机 `OptionsBinding.DeviceOptions`，不会往订阅目录写配置。
 - BepInEx 的 `.cfg` 与工坊版配置相互独立，首次切换请在 F8 菜单重新确认设置。
 - 主机功能不强制客机安装；转账、客机菜单、求救和 IP/LAN 功能仍要求相应端安装。双方游戏版本须一致，其他工坊包的依赖检查照常生效。

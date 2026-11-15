@@ -15,7 +15,7 @@ internal static class Program
     private static void Tick(float time) { Time.realtimeSinceStartup = time; VersionCompatibility.Tick(); }
     private static VersionCompatibilityHelloMessage Hello(string mod = Plugin.PluginVersion) =>
         new VersionCompatibilityHelloMessage { gameVersion = Application.version, modVersion = mod };
-    private static VersionCompatibilityNoticeMessage Notice(string mod = Plugin.PluginVersion, string game = "1.1.2") =>
+    private static VersionCompatibilityNoticeMessage Notice(string mod = Plugin.PluginVersion, string game = "1.1.3") =>
         new VersionCompatibilityNoticeMessage { gameVersion = game, modVersion = mod };
     private static void StartClient()
     {
@@ -72,8 +72,9 @@ internal static class Program
         Check(VersionReminder.Visible.Values.Single().StartsWith("VersionUnconfirmedWarning"), "Incomplete reports must not describe identical Mod versions as mismatched");
         Tick(305);
         Check(NetworkClient.Sent.Count == 8, "Continue retrying after an incomplete notice");
-        NetworkClient.Receive(Notice(game: "1.1.1"));
+        NetworkClient.Receive(Notice(game: "1.1.2"));
         Check(VersionReminder.Visible.Values.Single().StartsWith("GameVersionMismatchWarning"), "Game mismatch remains explicit");
+        Check(!VersionCompatibility.HostSupportsProtocolMetadata(), "A 1.1.2 report cannot authorize custom features in a 1.1.3 session");
         SteamInvitation.waitForExternalConnect = true;
         VersionCompatibility.ClearClientTarget();
         NetworkClient.connection = null;

@@ -1,6 +1,6 @@
 param(
     [string]$GameDir = $env:SEPHIRIA_DIR,
-    [string]$Version = "3.10.0",
+    [string]$Version = "3.10.1",
     [switch]$IncludeWorkshop
 )
 

@@ -19,7 +19,7 @@ namespace UnityEngine
 {
     public enum KeyCode { None, F8, F9, F10, F11, F12 }
     public static class Mathf { public static int Clamp(int value, int min, int max) => Math.Max(min, Math.Min(value, max)); }
-    public static class Application { public static string version = "1.1.2"; }
+    public static class Application { public static string version = "1.1.3"; }
     public static class Time { public static float realtimeSinceStartup; }
     public class GameObject
     {

@@ -8,7 +8,7 @@
     <AssemblyName Condition="'$(Loader)' == 'Workshop'">SephiriaTogether.Workshop</AssemblyName>
     <DefineConstants Condition="'$(Loader)' == 'Workshop'">$(DefineConstants);WORKSHOP</DefineConstants>
     <RootNamespace>SephiriaTogether</RootNamespace>
-    <Version>3.10.0</Version>
+    <Version>3.10.1</Version>
     <GameDir Condition="'$(GameDir)' == '' and '$(SEPHIRIA_DIR)' != ''">$(SEPHIRIA_DIR)</GameDir>
   </PropertyGroup>
 
